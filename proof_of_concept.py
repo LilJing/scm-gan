@@ -59,15 +59,14 @@ class Net(nn.Module):
         super().__init__()
         # Input: State + Action
         # Output: State
-        self.fc1 = nn.Linear(4 + 1, 128)
-        self.fc2 = nn.Linear(128, 4)
+        self.fc1 = nn.Linear(4 + 1, 16, bias=False)
+        self.fc2 = nn.Linear(16, 4)
         # one-layer version
         #self.fc1 = nn.Linear(5, 4)
 
     def forward(self, x):
         x = self.fc1(x)
-        #x = F.leaky_relu(x, 0.2)
-        x = F.relu(x)
+        x = F.leaky_relu(x, 0.2)
         x = self.fc2(x)
         x = F.sigmoid(x * 10)
         return x
@@ -78,19 +77,19 @@ def compute_causal_graph(model):
     rows = []
     for i in range(5):
         x = torch.zeros(5)
-        zero_return = torch.matmul(model.fc2.weight.abs(), torch.matmul(model.fc1.weight.abs(), x))
+        zero_return = model(x) #torch.matmul(model.fc2.weight.abs(), torch.matmul(model.fc1.weight.abs(), x))
         x[i] = 1.
         # Continuous version
-        one_return = torch.matmul(model.fc2.weight.abs(), torch.matmul(model.fc1.weight.abs(), x))
+        one_return = model(x) # torch.matmul(model.fc2.weight.abs(), torch.matmul(model.fc1.weight.abs(), x))
         # One-layer version
         #result = torch.matmul(model.fc1.weight.abs(), x)
         # Thresholded version
         def binarize(W, theta=.01):
             return (W.abs() > theta).type(torch.FloatTensor)
         #result = torch.matmul(binarize(model.fc2.weight), torch.matmul(binarize(model.fc1.weight), x))
-        rows.append(np.array((one_return - zero_return).cpu().data))
+        rows.append(np.array((one_return - zero_return).abs().cpu().data))
     scm = np.array(rows)
-    scm -= scm.min()
+    #scm -= scm.min()
     eps = .0001
     return scm / (scm.max() + eps)
 
@@ -125,7 +124,7 @@ def render_causal_graph(scm):
     adjacency[:4,:] = scm.transpose()
     adjacency = adjacency.transpose()
     print(adjacency)
-    edge_alphas = adjacency.flatten()
+    edge_alphas = adjacency.flatten() **2
 
     from networkx.classes.multidigraph import DiGraph
     G = DiGraph(np.ones((5,5)))
@@ -170,7 +169,7 @@ for i in range(iters):
 
     l1_loss = 0.
     for param in model.parameters():
-        l1_loss += .01 * F.l1_loss(param, torch.zeros(param.shape))
+        l1_loss += .1 * F.l1_loss(param, torch.zeros(param.shape))
     ts.collect('Sparsity loss', l1_loss)
 
     loss = pred_loss + l1_loss
