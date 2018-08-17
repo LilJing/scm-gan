@@ -22,6 +22,8 @@ class FourBitsEnv():
         # Bits 0, 1, 2, 3: W X Y Z
         self.state[0], self.state[1], self.state[2], self.state[3] = \
             a, self.state[0], self.state[1], self.state[2]
+        #if a:
+        #    self.state[3] *= -1
         #self.state = np.clip(self.state, -1, 1)
 
 
@@ -169,7 +171,6 @@ for i in range(iters):
     l1_loss = 0.
     l1_loss += 2.0 * F.l1_loss(model.fc1.weight, torch.zeros(model.fc1.weight.shape))
     l1_loss += 2.0 * F.l1_loss(model.fc2.weight, torch.zeros(model.fc2.weight.shape))
-
     ts.collect('Sparsity loss', l1_loss)
 
     loss = pred_loss + l1_loss
@@ -178,7 +179,8 @@ for i in range(iters):
     if i % 10000 == 0:
         print(compute_causal_graph(model))
         scm = compute_causal_graph(model)
-        imutil.show(render_causal_graph(scm))
+        caption = 'Prediction Loss {:.03f}'.format(pred_loss)
+        imutil.show(render_causal_graph(scm), video_filename='causal.mjpeg', caption=caption)
         print(model.fc1.weight)
         print(model.fc2.weight)
         print(model.fc2.bias)
