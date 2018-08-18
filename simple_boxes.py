@@ -14,8 +14,7 @@ class FallingBoxEnv():
         # The "true" latent space is two values which vary
         #self.x = np.random.randint(8, 24)
         #self.y = np.random.randint(8, 24)
-        #self.color = np.random.uniform(0.25, 1)
-        self.color = 1.0
+        self.color = np.random.uniform(0.25, 1)
         self.radius = np.random.randint(4, 14)
         self.build_state()
 
@@ -23,13 +22,11 @@ class FallingBoxEnv():
     def step(self, a):
         # Radius is controllable
         if a[0]:
-            self.radius -= 1
+            self.radius -= 2
         else:
-            self.radius += 1
-
+            self.radius += 2
         # Color is not controllable
         #self.color += .01
-
         self.build_state()
 
     def build_state(self):
@@ -250,9 +247,28 @@ def render_causal_graph(scm):
     return imutil.show(plt, return_pixels=True, display=False, save=False)
 
 
+def demo_latent_dimensions(before, encoder, decoder, transition, latent_size):
+    batch_size = before.shape[0]
+    actions = torch.zeros(batch_size, 2).cuda()
+    actions[:, 0] = 1.
+    z = transition(encoder(before), actions)
+    for i in range(latent_size):
+        images = []
+        dim_min = z.min(dim=1)[0][i]
+        dim_max = z.max(dim=1)[0][i]
+        N = batch_size
+        for j in range(N):
+            dim_range = dim_max - dim_min
+            val = dim_min + dim_range * 1.0 * j / N
+            zp = z.clone()
+            zp[:, i] = val
+            images.append(decoder(zp))
+        imutil.show(torch.cat(images, dim=0))
+
+
 # ok now, can the network learn the task?
 data = build_dataset()
-latent_size = 4
+latent_size = 2
 num_actions = 2
 encoder = Encoder(latent_size)
 decoder = Decoder(latent_size)
@@ -282,8 +298,8 @@ for i in range(iters):
     ts.collect('Reconstruction loss', pred_loss)
 
     l1_loss = 0.
-    #l1_loss += 2.0 * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape))
-    #l1_loss += 2.0 * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape))
+    l1_loss += 2.0 * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
+    l1_loss += 2.0 * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
     ts.collect('Sparsity loss', l1_loss)
 
     loss = pred_loss + l1_loss
@@ -302,6 +318,7 @@ for i in range(iters):
         print(transition.fc1.weight)
         print(transition.fc2.weight)
         print(transition.fc2.bias)
+        demo_latent_dimensions(before[:10], encoder, decoder, transition, latent_size)
     ts.print_every(1)
 
 
@@ -309,5 +326,3 @@ vid.finish()
 
 print(ts)
 
-scm = compute_causal_graph(model)
-imutil.show(render_causal_graph(scm))
