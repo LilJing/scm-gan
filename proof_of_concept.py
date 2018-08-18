@@ -22,8 +22,6 @@ class FourBitsEnv():
         # Bits 0, 1, 2, 3: W X Y Z
         self.state[0], self.state[1], self.state[2], self.state[3] = \
             a, self.state[0], self.state[1], self.state[2]
-        #if a:
-        #    self.state[3] *= -1
         #self.state = np.clip(self.state, -1, 1)
 
 
@@ -150,16 +148,17 @@ def render_causal_graph(scm):
         ax = plt.gca()
         ax.set_axis_off()
         plt.show()
-    return imutil.show(plt, return_pixels=True, display=False)
+    return imutil.show(plt, return_pixels=True, display=False, save=False)
 
 
 # ok now, can the network learn the task?
 data = build_dataset()
 model = Net()
 optimizer = optim.Adam(model.parameters(), lr=0.0001)
-iters = 1000 * 1000
+iters = 100 * 1000
 ts = TimeSeries('Training', iters)
 
+vid = imutil.VideoMaker('causal_model.mp4')
 for i in range(iters):
     model.zero_grad()
     input, target = get_batch(data)
@@ -169,27 +168,26 @@ for i in range(iters):
     ts.collect('Prediction loss', pred_loss)
 
     l1_loss = 0.
-    l1_loss += 2.0 * F.l1_loss(model.fc1.weight, torch.zeros(model.fc1.weight.shape))
-    l1_loss += 2.0 * F.l1_loss(model.fc2.weight, torch.zeros(model.fc2.weight.shape))
+    #l1_loss += 2.0 * F.l1_loss(model.fc1.weight, torch.zeros(model.fc1.weight.shape))
+    #l1_loss += 2.0 * F.l1_loss(model.fc2.weight, torch.zeros(model.fc2.weight.shape))
     ts.collect('Sparsity loss', l1_loss)
 
     loss = pred_loss + l1_loss
 
     loss.backward()
-    if i % 10000 == 0:
+    if i % 1000 == 0:
         print(compute_causal_graph(model))
         scm = compute_causal_graph(model)
         caption = 'Prediction Loss {:.03f}'.format(pred_loss)
-        imutil.show(render_causal_graph(scm), video_filename='causal.mjpeg', caption=caption)
+        vid.write_frame(render_causal_graph(scm), caption=caption)
         print(model.fc1.weight)
         print(model.fc2.weight)
         print(model.fc2.bias)
     ts.print_every(1)
     optimizer.step()
+vid.finish()
 
 print(ts)
-
-import pdb; pdb.set_trace()
 
 scm = compute_causal_graph(model)
 imutil.show(render_causal_graph(scm))

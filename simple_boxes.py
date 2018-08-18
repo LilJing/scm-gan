@@ -14,7 +14,8 @@ class FallingBoxEnv():
         # The "true" latent space is two values which vary
         #self.x = np.random.randint(8, 24)
         #self.y = np.random.randint(8, 24)
-        self.color = np.random.uniform(0.25, 1)
+        #self.color = np.random.uniform(0.25, 1)
+        self.color = 1.0
         self.radius = np.random.randint(4, 14)
         self.build_state()
 
@@ -27,7 +28,7 @@ class FallingBoxEnv():
             self.radius += 1
 
         # Color is not controllable
-        self.color += .01
+        #self.color += .01
 
         self.build_state()
 
@@ -73,12 +74,16 @@ class Encoder(nn.Module):
         self.latent_size = latent_size
         # 1x32x32
         self.conv1 = nn.Conv2d(1, 32, 3, stride=1, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
         # 32x32x32
         self.conv2 = nn.Conv2d(32, 64, 4, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
         # 64x16x16
         self.conv3 = nn.Conv2d(64, 64, 4, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(64)
         # 64x8x8
         self.conv4 = nn.Conv2d(64, 64, 4, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm2d(64)
         # 64x4x4
         self.fc1 = nn.Linear(64*4*4, latent_size)
         self.cuda()
@@ -88,13 +93,21 @@ class Encoder(nn.Module):
         x = x.unsqueeze(1)
         # batch x 1 x 32 x 32
         x = self.conv1(x)
+        x = self.bn1(x)
         x = F.leaky_relu(x, 0.2)
+
         x = self.conv2(x)
+        x = self.bn2(x)
         x = F.leaky_relu(x, 0.2)
+
         x = self.conv3(x)
+        x = self.bn3(x)
         x = F.leaky_relu(x, 0.2)
+
         x = self.conv4(x)
+        x = self.bn4(x)
         x = F.leaky_relu(x, 0.2)
+
         x = x.view(-1, 64*4*4)
         x = self.fc1(x)
         return x
@@ -264,8 +277,8 @@ for i in range(iters):
     z_prime = transition(z, actions)
     predicted = decoder(z_prime)
 
-    #pred_loss = F.binary_cross_entropy(predicted, target)
-    pred_loss = torch.mean((predicted - target) ** 2)
+    pred_loss = F.binary_cross_entropy(predicted, target)
+    #pred_loss = torch.mean((predicted - target) ** 2)
     ts.collect('Reconstruction loss', pred_loss)
 
     l1_loss = 0.
