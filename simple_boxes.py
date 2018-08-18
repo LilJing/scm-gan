@@ -12,26 +12,28 @@ from logutil import TimeSeries
 class FallingBoxEnv():
     def __init__(self):
         # The "true" latent space is two values which vary
-        #self.x = np.random.randint(8, 24)
-        #self.y = np.random.randint(8, 24)
-        self.color = np.random.uniform(0.25, 1)
+        self.x = np.random.randint(8, 24)
+        self.y = np.random.randint(8, 24)
+        self.color = 1.0
         self.radius = np.random.randint(4, 14)
         self.build_state()
 
     # The agent takes a binary action (button 0 or button 1) which changes the state
     def step(self, a):
-        # Radius is controllable
+        # Some things can be controlled
         if a[0]:
-            self.radius -= 2
+            self.x -= 3
         else:
-            self.radius += 2
-        # Color is not controllable
-        #self.color += .01
+            self.x += 3
+        # Other things can't be controlled
+        self.radius -= 2
+        self.color += .1
         self.build_state()
 
     def build_state(self):
         self.state = np.zeros((32,32))
-        self.state[16-self.radius: 16 + self.radius, 16-self.radius:16+self.radius] = self.color
+        self.state[self.y-self.radius:self.y + self.radius, self.x-self.radius:self.x+self.radius] = self.color
+        self.state = np.clip(self.state, 0, 1)
 
 
 def build_dataset(size=10000):
@@ -268,7 +270,7 @@ def demo_latent_dimensions(before, encoder, decoder, transition, latent_size):
 
 # ok now, can the network learn the task?
 data = build_dataset()
-latent_size = 2
+latent_size = 4
 num_actions = 2
 encoder = Encoder(latent_size)
 decoder = Decoder(latent_size)
@@ -298,8 +300,8 @@ for i in range(iters):
     ts.collect('Reconstruction loss', pred_loss)
 
     l1_loss = 0.
-    l1_loss += 2.0 * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
-    l1_loss += 2.0 * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
+    #l1_loss += .1 * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
+    #l1_loss += .1 * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
     ts.collect('Sparsity loss', l1_loss)
 
     loss = pred_loss + l1_loss
