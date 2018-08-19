@@ -15,7 +15,7 @@ class FallingBoxEnv():
         self.x = np.random.randint(8, 24)
         self.y = np.random.randint(8, 24)
         self.color = 1.0
-        self.radius = np.random.randint(4, 14)
+        self.radius = 5
         self.build_state()
 
     # The agent takes a binary action (button 0 or button 1) which changes the state
@@ -26,8 +26,9 @@ class FallingBoxEnv():
         else:
             self.x += 3
         # Other things can't be controlled
-        self.radius -= 2
-        self.color += .1
+        self.y += 3
+        #self.radius -= 2
+        #self.color += .1
         self.build_state()
 
     def build_state(self):
@@ -116,7 +117,8 @@ class Decoder(nn.Module):
     def __init__(self, latent_size):
         super().__init__()
         self.latent_size = latent_size
-        self.deconv1 = nn.ConvTranspose2d(latent_size, 128, 4, stride=1)
+        self.fc1 = nn.Linear(latent_size, latent_size*2)
+        self.deconv1 = nn.ConvTranspose2d(latent_size*2, 128, 4, stride=1)
         self.bn1 = nn.BatchNorm2d(128)
         # 128 x 4 x 4
         self.deconv2 = nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1)
@@ -132,6 +134,9 @@ class Decoder(nn.Module):
         self.cuda()
 
     def forward(self, x):
+        x = self.fc1(x)
+        x = F.leaky_relu(x, 0.2)
+
         x = x.unsqueeze(-1).unsqueeze(-1)
         x = self.deconv1(x)
         x = F.leaky_relu(x, 0.2)
@@ -300,8 +305,8 @@ for i in range(iters):
     ts.collect('Reconstruction loss', pred_loss)
 
     l1_loss = 0.
-    #l1_loss += .1 * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
-    #l1_loss += .1 * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
+    l1_loss += .1 * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
+    l1_loss += .1 * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
     ts.collect('Sparsity loss', l1_loss)
 
     loss = pred_loss + l1_loss
@@ -327,4 +332,3 @@ for i in range(iters):
 vid.finish()
 
 print(ts)
-
