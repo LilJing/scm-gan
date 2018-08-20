@@ -1,4 +1,4 @@
-
+import time
 import os
 import json
 import numpy as np
@@ -273,9 +273,31 @@ def demo_latent_dimensions(before, encoder, decoder, transition, latent_size):
         imutil.show(torch.cat(images, dim=0))
 
 
+def demo_latent_video(before, encoder, decoder, transition, latent_size, epoch=0):
+    start_time = time.time()
+    batch_size = before.shape[0]
+    actions = torch.zeros(batch_size, 2).cuda()
+    actions[:, 0] = 1.
+    z = transition(encoder(before), actions)
+    for i in range(latent_size):
+        vid_filename = 'iter_{:04d}_dim_{:02d}'.format(epoch, i)
+        vid = imutil.VideoMaker(vid_filename)
+        dim_min = z.min(dim=1)[0][i]
+        dim_max = z.max(dim=1)[0][i]
+        N = 60
+        for j in range(N):
+            dim_range = dim_max - dim_min
+            val = dim_min + dim_range * 1.0 * j / N
+            zp = z.clone()
+            zp[:, i] = val
+            vid.write_frame(decoder(zp))
+        vid.finish()
+    print('Finished generating videos in {:03f}s'.format(time.time() - start_time))
+
+
 # ok now, can the network learn the task?
 data = build_dataset()
-latent_size = 4
+latent_size = 3
 num_actions = 2
 encoder = Encoder(latent_size)
 decoder = Decoder(latent_size)
@@ -326,6 +348,7 @@ for i in range(iters):
         print(transition.fc2.weight)
         print(transition.fc2.bias)
         demo_latent_dimensions(before[:10], encoder, decoder, transition, latent_size)
+        demo_latent_video(before[:4], encoder, decoder, transition, latent_size, epoch=i)
     ts.print_every(1)
 
 
