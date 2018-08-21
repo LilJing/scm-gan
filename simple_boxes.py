@@ -14,8 +14,8 @@ class FallingBoxEnv():
         # The "true" latent space is two values which vary
         self.x = np.random.randint(8, 24)
         self.y = np.random.randint(8, 24)
-        self.color = 1.0
-        self.radius = 5
+        self.color = 1.0#np.random.uniform(0.25, 1.0)
+        self.radius = np.random.randint(4,10)
         self.build_state()
 
     # The agent takes a binary action (button 0 or button 1) which changes the state
@@ -26,7 +26,7 @@ class FallingBoxEnv():
         else:
             self.x += 3
         # Other things can't be controlled
-        self.y += 3
+        #self.y += 3
         #self.radius -= 2
         #self.color += .1
         self.build_state()
@@ -280,7 +280,7 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, epoch=0
     actions[:, 0] = 1.
     z = transition(encoder(before), actions)
     for i in range(latent_size):
-        vid_filename = 'iter_{:04d}_dim_{:02d}'.format(epoch, i)
+        vid_filename = 'iter_{:06d}_dim_{:02d}'.format(epoch, i)
         vid = imutil.VideoMaker(vid_filename)
         dim_min = z.min(dim=1)[0][i]
         dim_max = z.max(dim=1)[0][i]
@@ -290,7 +290,7 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, epoch=0
             val = dim_min + dim_range * 1.0 * j / N
             zp = z.clone()
             zp[:, i] = val
-            vid.write_frame(decoder(zp))
+            vid.write_frame(decoder(zp), resize_to=(256,256))
         vid.finish()
     print('Finished generating videos in {:03f}s'.format(time.time() - start_time))
 
@@ -306,7 +306,7 @@ opt_encoder = optim.Adam(encoder.parameters(), lr=0.0001)
 opt_decoder = optim.Adam(decoder.parameters(), lr=0.0001)
 opt_transition = optim.Adam(transition.parameters(), lr=0.0001)
 
-iters = 100 * 1000
+iters = 20 * 1000
 ts = TimeSeries('Training', iters)
 
 vid = imutil.VideoMaker('causal_model.mp4')
