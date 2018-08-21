@@ -14,7 +14,7 @@ class FallingBoxEnv():
         # The "true" latent space is two values which vary
         self.x = np.random.randint(8, 24)
         self.y = np.random.randint(8, 24)
-        self.color = 1.0#np.random.uniform(0.25, 1.0)
+        self.color = 1.0 # np.random.uniform(0.25, 1.0)
         self.radius = np.random.randint(4,10)
         self.build_state()
 
@@ -281,7 +281,7 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, epoch=0
     z = transition(encoder(before), actions)
     for i in range(latent_size):
         vid_filename = 'iter_{:06d}_dim_{:02d}'.format(epoch, i)
-        vid = imutil.VideoMaker(vid_filename)
+        vid = imutil.VideoLoop(vid_filename)
         dim_min = z.min(dim=1)[0][i]
         dim_max = z.max(dim=1)[0][i]
         N = 60
@@ -327,8 +327,8 @@ for i in range(iters):
     ts.collect('Reconstruction loss', pred_loss)
 
     l1_loss = 0.
-    l1_loss += .1 * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
-    l1_loss += .1 * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
+    l1_loss += .15 * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
+    l1_loss += .15 * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
     ts.collect('Sparsity loss', l1_loss)
 
     loss = pred_loss + l1_loss
@@ -347,8 +347,8 @@ for i in range(iters):
         print(transition.fc1.weight)
         print(transition.fc2.weight)
         print(transition.fc2.bias)
-        demo_latent_dimensions(before[:10], encoder, decoder, transition, latent_size)
-        demo_latent_video(before[:4], encoder, decoder, transition, latent_size, epoch=i)
+        demo_latent_dimensions(before[:9], encoder, decoder, transition, latent_size)
+        demo_latent_video(before[:9], encoder, decoder, transition, latent_size, epoch=i)
     ts.print_every(1)
 
 
