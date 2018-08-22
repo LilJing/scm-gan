@@ -20,13 +20,13 @@ class FallingBoxEnv():
 
     # The agent takes a binary action (button 0 or button 1) which changes the state
     def step(self, a):
-        # Some things can be controlled
+        # Some dimensions change in reaction to the agent's actions
         if a[0]:
             self.x -= 3
         else:
             self.x += 3
-        # Other things can't be controlled
-        #self.y += 3
+        # Other dimensions change, but not based on agent actions
+        self.y += 5
         #self.radius -= 2
         #self.color += .1
         self.build_state()
@@ -306,7 +306,7 @@ opt_encoder = optim.Adam(encoder.parameters(), lr=0.0001)
 opt_decoder = optim.Adam(decoder.parameters(), lr=0.0001)
 opt_transition = optim.Adam(transition.parameters(), lr=0.0001)
 
-iters = 20 * 1000
+iters = 100 * 1000
 ts = TimeSeries('Training', iters)
 
 vid = imutil.VideoMaker('causal_model.mp4')
@@ -326,9 +326,10 @@ for i in range(iters):
     #pred_loss = torch.mean((predicted - target) ** 2)
     ts.collect('Reconstruction loss', pred_loss)
 
+    l1_scale = (5.0 * i) / iters
     l1_loss = 0.
-    l1_loss += .15 * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
-    l1_loss += .15 * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
+    l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
+    l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
     ts.collect('Sparsity loss', l1_loss)
 
     loss = pred_loss + l1_loss
