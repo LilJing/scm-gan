@@ -9,14 +9,15 @@ import imutil
 from logutil import TimeSeries
 
 
-class FallingBoxEnv():
+class FallingEllipseEnv():
     def __init__(self):
         # The "true" latent space is two values which vary
         self.x = np.random.randint(8, 24)
         self.y = np.random.randint(8, 24)
         self.rotation = np.random.uniform(0, 2 * np.pi)
         self.color = 1.0 # np.random.uniform(0.25, 1.0)
-        self.radius = np.random.randint(4, 8)
+        self.radius = np.random.randint(5, 10)
+        self.minor_radius = 3
         self.build_state()
 
     # The agent can press four buttons: left, right, rotate-left, rotate-right
@@ -28,9 +29,9 @@ class FallingBoxEnv():
             self.x += 3
 
         if a[2]:
-            self.radius -= 1
+            self.rotation -= 1
         elif a[3]:
-            self.radius += 1
+            self.rotation += 1
 
         # Other dimensions change, but not based on agent actions
         self.y += 5
@@ -40,14 +41,15 @@ class FallingBoxEnv():
 
     def build_state(self):
         self.state = np.zeros((32,32))
-        self.state[self.y-self.radius:self.y + self.radius, self.x-self.radius:self.x+self.radius] = self.color
-        self.state = np.clip(self.state, 0, 1)
+        import skimage.draw
+        rr, cc = skimage.draw.ellipse(self.x, self.y, self.radius, self.minor_radius, rotation=self.rotation, shape=self.state.shape)
+        self.state[rr, cc] = self.color
 
 
 def build_dataset(num_actions, size=10000):
     dataset = []
     for i in tqdm(range(size)):
-        env = FallingBoxEnv()
+        env = FallingEllipseEnv()
         before = np.array(env.state)
         action = np.zeros(shape=(num_actions,))
         action[np.random.randint(num_actions)] = 1.
@@ -300,7 +302,7 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
 
 
 # ok now, can the network learn the task?
-latent_size = 3
+latent_size = 5
 num_actions = 4
 data = build_dataset(num_actions)
 encoder = Encoder(latent_size)
@@ -349,9 +351,6 @@ for i in range(iters):
         scm = compute_causal_graph(transition, latent_size, num_actions)
         caption = 'Prediction Loss {:.03f}'.format(pred_loss)
         vid.write_frame(render_causal_graph(scm), caption=caption)
-        print(transition.fc1.weight)
-        print(transition.fc2.weight)
-        print(transition.fc2.bias)
         demo_latent_dimensions(before[:9], encoder, decoder, transition, latent_size, num_actions)
         demo_latent_video(before[:9], encoder, decoder, transition, latent_size, num_actions, epoch=i)
     ts.print_every(1)
