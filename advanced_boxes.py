@@ -12,11 +12,11 @@ from logutil import TimeSeries
 class FallingEllipseEnv():
     def __init__(self):
         # The "true" latent space is two values which vary
-        self.x = np.random.randint(8, 24)
-        self.y = np.random.randint(8, 24)
+        self.x = np.random.randint(10, 22)
+        self.y = np.random.randint(10, 22)
         self.rotation = np.random.uniform(0, 2 * np.pi)
         self.color = 1.0 # np.random.uniform(0.25, 1.0)
-        self.radius = np.random.randint(5, 10)
+        self.radius = np.random.randint(5, 12)
         self.minor_radius = 3
         self.build_state()
 
@@ -34,7 +34,7 @@ class FallingEllipseEnv():
             self.rotation += 1
 
         # Other dimensions change, but not based on agent actions
-        self.y += 5
+        #self.y += 5
 
         #self.color += .1
         self.build_state()
@@ -302,7 +302,7 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
 
 
 # ok now, can the network learn the task?
-latent_size = 5
+latent_size = 4
 num_actions = 4
 data = build_dataset(num_actions)
 encoder = Encoder(latent_size)
@@ -312,7 +312,7 @@ opt_encoder = optim.Adam(encoder.parameters(), lr=0.0001)
 opt_decoder = optim.Adam(decoder.parameters(), lr=0.0001)
 opt_transition = optim.Adam(transition.parameters(), lr=0.0001)
 
-iters = 100 * 1000
+iters = 200 * 1000
 ts = TimeSeries('Training', iters)
 
 vid = imutil.VideoMaker('causal_model.mp4')
@@ -332,7 +332,7 @@ for i in range(iters):
     #pred_loss = torch.mean((predicted - target) ** 2)
     ts.collect('Reconstruction loss', pred_loss)
 
-    l1_scale = (5.0 * i) / iters
+    l1_scale = (10.0 * i) / iters
     l1_loss = 0.
     l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
     l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
