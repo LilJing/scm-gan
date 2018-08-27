@@ -9,7 +9,7 @@ import imutil
 from logutil import TimeSeries
 
 
-class FallingEllipseEnv():
+class BoxEnv():
     def __init__(self):
         # The "true" latent space is two values which vary
         self.x = np.random.randint(10, 22)
@@ -34,9 +34,10 @@ class FallingEllipseEnv():
             self.y += 3
 
         # Other dimensions change, but not based on agent actions
+        # This is key: width changes on its own, independent from height
+        # Otherwise, the network might more naturally learn eg. size and aspect ratio
         self.width -= 2
 
-        #self.color += .1
         self.build_state()
 
     def build_state(self):
@@ -48,7 +49,7 @@ class FallingEllipseEnv():
 def build_dataset(num_actions, size=10000):
     dataset = []
     for i in tqdm(range(size)):
-        env = FallingEllipseEnv()
+        env = BoxEnv()
         before = np.array(env.state)
         action = np.zeros(shape=(num_actions,))
         action[np.random.randint(num_actions)] = 1.
@@ -312,7 +313,7 @@ opt_encoder = optim.Adam(encoder.parameters(), lr=0.0001)
 opt_decoder = optim.Adam(decoder.parameters(), lr=0.0001)
 opt_transition = optim.Adam(transition.parameters(), lr=0.0001)
 
-iters = 200 * 1000
+iters = 100 * 1000
 ts = TimeSeries('Training', iters)
 
 vid = imutil.VideoMaker('causal_model.mp4')
