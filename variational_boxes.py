@@ -91,6 +91,7 @@ class Encoder(nn.Module):
         self.bn4 = nn.BatchNorm2d(64)
         # 64x4x4
         self.fc1 = nn.Linear(64*4*4, 128)
+        self.bn5 = nn.BatchNorm1d(128)
         self.fc2a = nn.Linear(128, latent_size)
         self.fc2b = nn.Linear(128, latent_size)
         self.cuda()
@@ -117,6 +118,8 @@ class Encoder(nn.Module):
 
         x = x.view(-1, 64*4*4)
         x = self.fc1(x)
+        x = self.bn5(x)
+
         mu = self.fc2a(x)
         log_variance = self.fc2b(x)
         return mu, log_variance
@@ -329,8 +332,12 @@ for i in range(iters):
 
     # Estimate of the Kullback-Liebler divergence
     mean_loss = torch.sum(mu ** 2)
-    variance_loss = torch.sum(log_variance.exp() - log_variance - 1)
-    kld_loss = (mean_loss + variance_loss) / 2
+    #variance_loss = torch.sum(log_variance.exp() - log_variance - 1)
+    variance_loss = torch.sum(log_variance.exp() - 1)
+    ts.collect('mu loss', mean_loss)
+    ts.collect('sigma loss', variance_loss)
+    beta = .01
+    kld_loss = beta * (mean_loss + variance_loss) / 2
     ts.collect('KL-divergence loss', kld_loss)
 
     l1_scale = (10.0 * i) / iters
