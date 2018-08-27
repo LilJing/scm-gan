@@ -90,9 +90,9 @@ class Encoder(nn.Module):
         self.conv4 = nn.Conv2d(64, 64, 4, stride=2, padding=1)
         self.bn4 = nn.BatchNorm2d(64)
         # 64x4x4
-        self.fc1 = nn.Linear(64*4*4, latent_size)
-        #self.fc2 = nn.Linear(64*4*4, latent_size)
-        self.bn5 = nn.BatchNorm1d(latent_size)
+        self.fc1 = nn.Linear(64*4*4, 128)
+        self.fc2a = nn.Linear(128, latent_size)
+        self.fc2b = nn.Linear(128, latent_size)
         self.cuda()
 
     def forward(self, x):
@@ -117,13 +117,9 @@ class Encoder(nn.Module):
 
         x = x.view(-1, 64*4*4)
         x = self.fc1(x)
-        #mu = self.fc1(x)
-        #variance = self.fc2(x)
-
-        # what if you used an empirical mean/variance?
-        # is it still variational?
-        x = self.bn5(x)
-        return x
+        mu = self.fc2a(x)
+        log_variance = self.fc2b(x)
+        return mu, log_variance
 
 
 class Decoder(nn.Module):
@@ -146,8 +142,8 @@ class Decoder(nn.Module):
         self.deconv5 = nn.ConvTranspose2d(16, 1, 3, stride=1, padding=1)
         self.cuda()
 
-    def forward(self, x):
-        x = self.fc1(x)
+    def forward(self, z):
+        x = self.fc1(z)
         x = F.leaky_relu(x, 0.2)
 
         x = x.unsqueeze(-1).unsqueeze(-1)
@@ -171,6 +167,11 @@ class Decoder(nn.Module):
         x = F.sigmoid(x)
         return x
 
+
+def sample(mu, log_variance):
+    std = torch.exp(0.5 * log_variance)
+    eps = torch.randn_like(std)
+    return eps.mul(std).add_(mu)
 
 
 class Transition(nn.Module):
@@ -268,31 +269,15 @@ def render_causal_graph(scm):
     return imutil.show(plt, return_pixels=True, display=False, save=False)
 
 
-def demo_latent_dimensions(before, encoder, decoder, transition, latent_size, num_actions):
-    batch_size = before.shape[0]
-    actions = torch.zeros(batch_size, num_actions).cuda()
-    actions[:, 0] = 1.
-    z = transition(encoder(before), actions)
-    for i in range(latent_size):
-        images = []
-        dim_min = z.min(dim=1)[0][i]
-        dim_max = z.max(dim=1)[0][i]
-        N = batch_size
-        for j in range(N):
-            dim_range = dim_max - dim_min
-            val = dim_min + dim_range * 1.0 * j / N
-            zp = z.clone()
-            zp[:, i] = val
-            images.append(decoder(zp))
-        imutil.show(torch.cat(images, dim=0))
-
-
 def demo_latent_video(before, encoder, decoder, transition, latent_size, num_actions, epoch=0):
     start_time = time.time()
     batch_size = before.shape[0]
     actions = torch.zeros(batch_size, num_actions).cuda()
     actions[:, 0] = 1.  # TODO
-    z = transition(encoder(before), actions)
+
+    mu, log_variance = encoder(before)
+    prev_z = sample(mu, log_variance)
+    z = transition(prev_z, actions)
     for i in range(latent_size):
         vid_filename = 'iter_{:06d}_dim_{:02d}'.format(epoch, i)
         vid = imutil.VideoLoop(vid_filename)
@@ -332,7 +317,9 @@ for i in range(iters):
     before, actions, target = get_batch(data)
 
     # Just try to autoencode
-    z = encoder(before)
+    mu, log_variance = encoder(before)
+    z = sample(mu, log_variance)
+
     z_prime = transition(z, actions)
     predicted = decoder(z_prime)
 
@@ -341,9 +328,10 @@ for i in range(iters):
     ts.collect('Reconstruction loss', pred_loss)
 
     # Estimate of the Kullback-Liebler divergence
-    #mean_loss = torch.sum(mu ** 2)
-    #variance_loss = torch.sum(logvar.exp() - logvar - 1)
-    #kld_loss = (mean_loss + variance_loss) / 2
+    mean_loss = torch.sum(mu ** 2)
+    variance_loss = torch.sum(log_variance.exp() - log_variance - 1)
+    kld_loss = (mean_loss + variance_loss) / 2
+    ts.collect('KL-divergence loss', kld_loss)
 
     l1_scale = (10.0 * i) / iters
     l1_loss = 0.
@@ -351,7 +339,7 @@ for i in range(iters):
     l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
     ts.collect('Sparsity loss', l1_loss)
 
-    loss = pred_loss + l1_loss
+    loss = pred_loss + kld_loss + l1_loss
 
     loss.backward()
     opt_encoder.step()
@@ -364,7 +352,6 @@ for i in range(iters):
         scm = compute_causal_graph(transition, latent_size, num_actions)
         caption = 'Prediction Loss {:.03f}'.format(pred_loss)
         vid.write_frame(render_causal_graph(scm), caption=caption)
-        demo_latent_dimensions(before[:9], encoder, decoder, transition, latent_size, num_actions)
         demo_latent_video(before[:9], encoder, decoder, transition, latent_size, num_actions, epoch=i)
     ts.print_every(1)
 
