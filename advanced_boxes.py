@@ -14,10 +14,10 @@ class FallingEllipseEnv():
         # The "true" latent space is two values which vary
         self.x = np.random.randint(10, 22)
         self.y = np.random.randint(10, 22)
-        self.rotation = np.random.uniform(0, 2 * np.pi)
+        #self.rotation = np.random.uniform(0, 2 * np.pi)
         self.color = 1.0 # np.random.uniform(0.25, 1.0)
-        self.radius = np.random.randint(5, 12)
-        self.minor_radius = 3
+        self.width = np.random.randint(5, 10)
+        self.height = np.random.randint(5, 10)
         self.build_state()
 
     # The agent can press four buttons: left, right, rotate-left, rotate-right
@@ -29,12 +29,12 @@ class FallingEllipseEnv():
             self.x += 3
 
         if a[2]:
-            self.rotation -= 1
+            self.y -= 3
         elif a[3]:
-            self.rotation += 1
+            self.y += 3
 
         # Other dimensions change, but not based on agent actions
-        #self.y += 5
+        self.width -= 2
 
         #self.color += .1
         self.build_state()
@@ -42,8 +42,7 @@ class FallingEllipseEnv():
     def build_state(self):
         self.state = np.zeros((32,32))
         import skimage.draw
-        rr, cc = skimage.draw.ellipse(self.x, self.y, self.radius, self.minor_radius, rotation=self.rotation, shape=self.state.shape)
-        self.state[rr, cc] = self.color
+        self.state[self.x - self.height:self.x + self.height, self.y - self.width: self.y + self.width] = self.color
 
 
 def build_dataset(num_actions, size=10000):
@@ -184,7 +183,8 @@ class Transition(nn.Module):
         x = F.leaky_relu(x, 0.2)
         x = self.fc2(x)
         x = F.tanh(x)
-        return x
+        # Fern hack: Predict a delta/displacement
+        return z + x
 
 # This function identifies the non-pruned connections
 def compute_causal_graph(model, latent_size, num_actions):
