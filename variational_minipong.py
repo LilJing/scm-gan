@@ -38,7 +38,7 @@ class BoxEnv():
 
         # Other dimensions change, but not based on agent actions
         self.ball_x += 1
-        self.ball_y += 1
+        #self.ball_y += 1
 
         self.build_state()
 
@@ -52,7 +52,7 @@ class BoxEnv():
                    self.ball_x-1:self.ball_x+1] = 1.0
 
 
-def build_dataset(num_actions, size=10000):
+def build_dataset(num_actions, size=50000):
     dataset = []
     for i in tqdm(range(size)):
         env = BoxEnv()
@@ -249,7 +249,6 @@ def render_causal_graph(scm):
     rows, cols = scm.shape
     adjacency = np.zeros((rows, rows))
     adjacency[:,:cols] = scm[:]
-    print(adjacency)
 
     edge_alphas = adjacency.flatten() **2
 
@@ -283,7 +282,9 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
     start_time = time.time()
     batch_size = before.shape[0]
     actions = torch.zeros(batch_size, num_actions).cuda()
-    actions[:, 0] = 1.  # TODO
+    for i in range(batch_size):
+        a = np.random.randint(0, num_actions)
+        actions[i, a] = 1
 
     mu, log_variance = encoder(before)
     prev_z = sample(mu, log_variance)
@@ -347,7 +348,7 @@ for i in range(iters):
     kld_loss = beta * (mean_loss + variance_loss) / 2
     ts.collect('KL-divergence loss', kld_loss)
 
-    l1_scale = (10.0 * i) / iters
+    l1_scale = (5.0 * i) / iters
     l1_loss = 0.
     l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
     l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
