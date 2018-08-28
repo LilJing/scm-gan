@@ -44,9 +44,12 @@ class BoxEnv():
 
     def build_state(self):
         self.state = np.zeros((32,32))
-        self.state[self.left_y - self.paddle_height:self.left_y + self.paddle_height, self.left_x - self.paddle_width: self.left_x + self.paddle_width] = 1.0
-        self.state[self.right_y - self.paddle_height:self.right_y + self.paddle_height, self.right_x - self.paddle_width: self.right_x + self.paddle_width] = 1.0
-        self.state[self.ball_y-1:self.ball_y+1, self.ball_x-1:self.ball_y+1] = 1.0
+        self.state[self.left_y - self.paddle_height:self.left_y + self.paddle_height,
+                   self.left_x - self.paddle_width: self.left_x + self.paddle_width] = 1.0
+        self.state[self.right_y - self.paddle_height:self.right_y + self.paddle_height,
+                   self.right_x - self.paddle_width: self.right_x + self.paddle_width] = 1.0
+        self.state[self.ball_y-1:self.ball_y+1,
+                   self.ball_x-1:self.ball_x+1] = 1.0
 
 
 def build_dataset(num_actions, size=10000):
