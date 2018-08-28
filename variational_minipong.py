@@ -362,11 +362,14 @@ for i in range(iters):
     opt_transition.step()
 
     if i % 1000 == 0:
-        imutil.show(target, caption='Target')
-        imutil.show(predicted, caption='Predicted')
+        filename = 'iter_{:06}_reconstruction.jpg'.format(i)
+        img = torch.cat([target, predicted.squeeze()])
+        imutil.show(img, filename=filename)
+
         scm = compute_causal_graph(transition, latent_size, num_actions)
         caption = 'Prediction Loss {:.03f}'.format(pred_loss)
         vid.write_frame(render_causal_graph(scm), caption=caption)
+
         demo_latent_video(before[:9], encoder, decoder, transition, latent_size, num_actions, epoch=i)
     ts.print_every(1)
 
