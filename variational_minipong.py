@@ -136,8 +136,11 @@ class Decoder(nn.Module):
     def __init__(self, latent_size):
         super().__init__()
         self.latent_size = latent_size
-        self.fc1 = nn.Linear(latent_size, latent_size*2)
-        self.deconv1 = nn.ConvTranspose2d(latent_size*2, 128, 4, stride=1)
+        self.fc1 = nn.Linear(latent_size, 128)
+        self.bn0 = nn.BatchNorm1d(128)
+        self.fc2 = nn.Linear(128, 256)
+
+        self.deconv1 = nn.ConvTranspose2d(256, 128, 4, stride=1)
         self.bn1 = nn.BatchNorm2d(128)
         # 128 x 4 x 4
         self.deconv2 = nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1)
@@ -154,6 +157,9 @@ class Decoder(nn.Module):
 
     def forward(self, z):
         x = self.fc1(z)
+        x = F.leaky_relu(x, 0.2)
+        x = self.bn0(x)
+        x = self.fc2(x)
         x = F.leaky_relu(x, 0.2)
 
         x = x.unsqueeze(-1).unsqueeze(-1)
