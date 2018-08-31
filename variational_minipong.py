@@ -298,15 +298,16 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
     for i in range(latent_size):
         vid_filename = 'iter_{:06d}_dim_{:02d}'.format(epoch, i)
         vid = imutil.VideoLoop(vid_filename)
-        dim_min = z.min(dim=1)[0][i]
-        dim_max = z.max(dim=1)[0][i]
+        dim_min = z.min(dim=1)[0][i] - 1.
+        dim_max = z.max(dim=1)[0][i] + 1.
         N = 60
         for j in range(N):
             dim_range = dim_max - dim_min
             val = dim_min + dim_range * 1.0 * j / N
             zp = z.clone()
             zp[:, i] = val
-            vid.write_frame(decoder(zp), resize_to=(256,256))
+            caption = "z{}={:.3f}".format(i, val)
+            vid.write_frame(decoder(zp), caption=caption)
         vid.finish()
     print('Finished generating videos in {:03f}s'.format(time.time() - start_time))
 
@@ -322,7 +323,7 @@ opt_encoder = optim.Adam(encoder.parameters(), lr=0.0001)
 opt_decoder = optim.Adam(decoder.parameters(), lr=0.0001)
 opt_transition = optim.Adam(transition.parameters(), lr=0.0001)
 
-iters = 100 * 1000
+iters = 20 * 1000
 ts = TimeSeries('Training', iters)
 
 vid = imutil.VideoMaker('causal_model.mp4')
@@ -354,7 +355,7 @@ for i in range(iters):
     kld_loss = beta * (mean_loss + variance_loss) / 2
     ts.collect('KL-divergence loss', kld_loss)
 
-    l1_scale = (5.0 * i) / iters
+    l1_scale = (10.0 * i) / iters
     l1_loss = 0.
     l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
     l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
