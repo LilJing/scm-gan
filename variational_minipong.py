@@ -1,3 +1,5 @@
+# A variational autoencoder with some structural causal model stuff
+# Uses a fake environment that looks sort of like Pong
 import time
 import os
 import json
@@ -226,17 +228,18 @@ def compute_causal_graph(model, latent_size, num_actions):
         one_return = torch.matmul(W2, torch.matmul(W1, x))# + model.fc2.bias
         result = (one_return - zero_return)
 
+        """
         # Thresholded version
         def binarize(W, theta=.01):
             return (W.abs() > theta).type(torch.FloatTensor)
-        #result = torch.matmul(binarize(model.fc2.weight), torch.matmul(binarize(model.fc1.weight), x))
+        result = torch.matmul(binarize(model.fc2.weight), torch.matmul(binarize(model.fc1.weight), x))
+        """
         rows.append(np.array(result.abs().cpu().data))
 
     scm = np.array(rows)
-    #scm -= scm.min()
+    scm -= scm.min()
     eps = .0001
     return scm / (scm.max() + eps)
-    #return scm
 
 
 # Just a helper function to render the graph to an image
@@ -319,11 +322,11 @@ data = build_dataset(num_actions)
 encoder = Encoder(latent_size)
 decoder = Decoder(latent_size)
 transition = Transition(latent_size, num_actions)
-opt_encoder = optim.Adam(encoder.parameters(), lr=0.0001)
-opt_decoder = optim.Adam(decoder.parameters(), lr=0.0001)
-opt_transition = optim.Adam(transition.parameters(), lr=0.0001)
+opt_encoder = optim.Adam(encoder.parameters(), lr=0.001)
+opt_decoder = optim.Adam(decoder.parameters(), lr=0.001)
+opt_transition = optim.Adam(transition.parameters(), lr=0.001)
 
-iters = 20 * 1000
+iters = 100 * 1000
 ts = TimeSeries('Training', iters)
 
 vid = imutil.VideoMaker('causal_model.mp4')
