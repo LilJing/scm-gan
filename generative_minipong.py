@@ -40,7 +40,7 @@ class BoxEnv():
 
         # Other dimensions change, but not based on agent actions
         self.ball_x += 1
-        #self.ball_y += 1
+        self.ball_y += 1
 
         self.build_state()
 
@@ -54,7 +54,7 @@ class BoxEnv():
                    self.ball_x-1:self.ball_x+1] = 1.0
 
 
-def build_dataset(num_actions, size=50000):
+def build_dataset(num_actions, size=100 * 1000):
     dataset = []
     for i in tqdm(range(size)):
         env = BoxEnv()
@@ -356,7 +356,7 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
             zp = z.clone()
             zp[:, i] = val
             caption = "z{}={:.3f}".format(i, val)
-            vid.write_frame(decoder(zp), caption=caption)
+            vid.write_frame(decoder(zp), caption=caption, resize_to=(512,512))
         vid.finish()
     print('Finished generating videos in {:03f}s'.format(time.time() - start_time))
 
