@@ -350,8 +350,8 @@ for i in range(iters):
 
     # Estimate of the Kullback-Liebler divergence
     mean_loss = torch.sum(mu ** 2)
-    #variance_loss = torch.sum(log_variance.exp() - log_variance - 1)
-    variance_loss = torch.sum(log_variance.exp())
+    variance_loss = torch.sum(log_variance.exp() - log_variance - 1)
+    #variance_loss = torch.sum(log_variance.exp())
     ts.collect('mu loss', mean_loss)
     ts.collect('sigma loss', variance_loss)
     beta = .01
