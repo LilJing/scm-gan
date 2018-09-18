@@ -175,11 +175,10 @@ class Discriminator(nn.Module):
 
         x = x.view(-1, 64*4*4)
         x = self.fc1(x)
-        x = self.bn5(x)
 
         # TODO: batch discriminator or batch stddev layer here
-        z = self.fc2(x)
-        return z
+        scores = self.fc2(x)
+        return scores
 
 
 class Decoder(nn.Module):
@@ -374,7 +373,7 @@ transition = Transition(latent_size, num_actions)
 opt_encoder = optim.Adam(encoder.parameters(), lr=0.001)
 opt_decoder = optim.Adam(decoder.parameters(), lr=0.001)
 opt_transition = optim.Adam(transition.parameters(), lr=0.001)
-opt_discriminator = optim.Adam(discriminator.parameters(), lr=0.001)
+opt_discriminator = optim.Adam(discriminator.parameters(), lr=0.01)
 
 iters = 100 * 1000
 ts = TimeSeries('Training', iters)
@@ -383,14 +382,19 @@ vid = imutil.VideoMaker('causal_model.mp4')
 for i in range(iters):
 
     # First train the discriminator
-    opt_discriminator.zero_grad()
-    _, _, real = get_batch(data, batch_size)
-    random_z = torch.zeros(batch_size, latent_size).normal_(1, 1).cuda()
-    fake = decoder(random_z)[:,0]
-    disc_loss = torch.relu(1 + discriminator(real)).sum() + torch.relu(1 - discriminator(fake)).sum()
-    ts.collect('Discriminator loss', disc_loss)
-    disc_loss.backward()
-    opt_discriminator.step()
+    for j in range(3):
+        opt_discriminator.zero_grad()
+        _, _, real = get_batch(data, batch_size)
+        random_z = torch.zeros(batch_size, latent_size).normal_(1, 1).cuda()
+        fake = decoder(random_z)[:,0]
+        disc_real = torch.relu(1 + discriminator(real)).sum()
+        disc_fake = torch.relu(1 - discriminator(fake)).sum()
+        disc_loss = disc_real + disc_fake
+        ts.collect('Disc real loss', disc_real)
+        ts.collect('Disc fake loss', disc_fake)
+        ts.collect('Discriminator loss', disc_loss)
+        disc_loss.backward()
+        opt_discriminator.step()
 
 
     # Now train the autoencoder
