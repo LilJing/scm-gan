@@ -149,8 +149,7 @@ class Discriminator(nn.Module):
         self.bn4 = nn.BatchNorm2d(64)
         # 64x4x4
         self.fc1 = nn.Linear(64*4*4, 128)
-        self.bn5 = nn.BatchNorm1d(128)
-        self.fc2 = nn.Linear(128, 1)
+        self.fc2 = nn.Linear(128 * 2, 1)
         self.cuda()
 
     def forward(self, x):
@@ -176,8 +175,9 @@ class Discriminator(nn.Module):
         x = x.view(-1, 64*4*4)
         x = self.fc1(x)
 
-        # TODO: batch discriminator or batch stddev layer here
-        scores = self.fc2(x)
+        # Minibatch Standard Deviation from Karras et al
+        augmented = torch.cat([x, torch.var(x, dim=0).expand(32, 128)], 1)
+        scores = self.fc2(augmented)
         return scores
 
 
@@ -229,7 +229,7 @@ class Decoder(nn.Module):
         x = self.bn4(x)
 
         x = self.deconv5(x)
-        x = F.sigmoid(x)
+        x = torch.sigmoid(x)
         return x
 
 
@@ -256,7 +256,7 @@ class Transition(nn.Module):
         x = self.fc1(x)
         x = F.leaky_relu(x, 0.2)
         x = self.fc2(x)
-        x = F.tanh(x)
+        x = torch.tanh(x)
         # Fern hack: Predict a delta/displacement
         return z + x
 
