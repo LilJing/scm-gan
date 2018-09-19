@@ -195,13 +195,13 @@ class Decoder(nn.Module):
         self.deconv2 = nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1)
         self.bn2 = nn.BatchNorm2d(64)
         # 64 x 8 x 8
-        self.deconv3 = nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1)
-        self.bn3 = nn.BatchNorm2d(32)
+        self.deconv3 = nn.ConvTranspose2d(64, 64, 4, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(64)
         # 32 x 16 x 16
-        self.deconv4 = nn.ConvTranspose2d(32, 16, 4, stride=2, padding=1)
-        self.bn4 = nn.BatchNorm2d(16)
+        self.deconv4 = nn.ConvTranspose2d(64, 64, 4, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm2d(64)
         # 16 x 32 x 32
-        self.deconv5 = nn.ConvTranspose2d(16, 1, 3, stride=1, padding=1)
+        self.deconv5 = nn.ConvTranspose2d(64, 1, 3, stride=1, padding=1)
         self.cuda()
 
     def forward(self, z):
@@ -361,6 +361,10 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
     print('Finished generating videos in {:03f}s'.format(time.time() - start_time))
 
 
+def clip_gradients(network, val):
+    for W in network.parameters():
+        W.grad.clamp_(-val, val)
+
 # ok now, can the network learn the task?
 latent_size = 4
 num_actions = 4
@@ -375,7 +379,7 @@ opt_decoder = optim.Adam(decoder.parameters(), lr=0.001)
 opt_transition = optim.Adam(transition.parameters(), lr=0.001)
 opt_discriminator = optim.Adam(discriminator.parameters(), lr=0.01)
 
-iters = 100 * 1000
+iters = 30 * 1000
 ts = TimeSeries('Training', iters)
 
 vid = imutil.VideoMaker('causal_model.mp4')
@@ -394,14 +398,23 @@ for i in range(iters):
         ts.collect('Disc fake loss', disc_fake)
         ts.collect('Discriminator loss', disc_loss)
         disc_loss.backward()
+        clip_gradients(discriminator, 1)
         opt_discriminator.step()
+
+    # Apply discriminator loss for realism
+    opt_decoder.zero_grad()
+    random_z = torch.zeros(batch_size, latent_size).normal_(1, 1).cuda()
+    fake = decoder(random_z)[:,0]
+    disc_loss = .01 * torch.relu(1 + discriminator(fake)).sum()
+    ts.collect('Gen. Disc loss', disc_loss)
+    disc_loss.backward()
+    opt_decoder.step()
 
 
     # Now train the autoencoder
     opt_encoder.zero_grad()
     opt_decoder.zero_grad()
     opt_transition.zero_grad()
-    opt_discriminator.zero_grad()
 
     before, actions, target = get_batch(data, batch_size)
 
@@ -415,22 +428,19 @@ for i in range(iters):
     #pred_loss = torch.mean((predicted - target) ** 2)
     ts.collect('Reconstruction loss', pred_loss)
 
-    # Discriminator loss
-    disc_loss = .01 * torch.relu(1 + discriminator(predicted[:,0])).sum()
-    ts.collect('Gen. Disc loss', disc_loss)
-
     l1_scale = (10.0 * i) / iters
     l1_loss = 0.
     l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
     l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
     ts.collect('Sparsity loss', l1_loss)
 
-    loss = pred_loss + l1_loss + disc_loss
+    loss = pred_loss + l1_loss
 
     loss.backward()
     opt_encoder.step()
     opt_decoder.step()
     opt_transition.step()
+
 
     if i % 1000 == 0:
         filename = 'iter_{:06}_reconstruction.jpg'.format(i)
