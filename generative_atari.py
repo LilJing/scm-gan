@@ -16,7 +16,7 @@ prev_states = None
 
 def convert_pong(img_batch):
     batch_size = len(img_batch)
-    cropped = np.array(img_batch)[:,32:-18].mean(-1)
+    cropped = np.array(img_batch)[:,34:-16].mean(-1)
     downsampled = np.array([block_reduce(c, (5,5), np.max) for c in cropped])
     downsampled = downsampled - downsampled.min()
     downsampled /= downsampled.max()
@@ -124,12 +124,15 @@ class Discriminator(nn.Module):
         # batch x 1 x 32 x 32
         x = self.conv1(x)
         x = F.leaky_relu(x, 0.2)
+        x = self.bn1(x)
 
         x = self.conv2(x)
         x = F.leaky_relu(x, 0.2)
+        x = self.bn2(x)
 
         x = self.conv3(x)
         x = F.leaky_relu(x, 0.2)
+        x = self.bn3(x)
 
         x = self.conv4(x)
         x = F.leaky_relu(x, 0.2)
@@ -337,7 +340,7 @@ def main():
     opt_transition = optim.Adam(transition.parameters(), lr=0.001)
     opt_discriminator = optim.Adam(discriminator.parameters(), lr=0.01)
 
-    iters = 30 * 1000
+    iters = 10 * 1000
     ts = TimeSeries('Training', iters)
 
     vid = imutil.VideoMaker('causal_model.mp4')
@@ -367,8 +370,8 @@ def main():
         disc_loss = .01 * torch.relu(1 + discriminator(fake)).sum()
         ts.collect('Gen. Disc loss', disc_loss)
         disc_loss.backward()
-        clip_gradients(decoder, 1)
-        opt_decoder.step()
+        clip_gradients(decoder, .01)
+        #opt_decoder.step()
 
 
         # Now train the autoencoder
