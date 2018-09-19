@@ -18,14 +18,14 @@ def convert_pong(img_batch):
     batch_size = len(img_batch)
     cropped = np.array(img_batch)[:,34:-16].mean(-1)
     downsampled = np.array([block_reduce(c, (5,5), np.max) for c in cropped])
-    downsampled = downsampled - downsampled.min()
-    downsampled /= downsampled.max()
+    downsampled -= downsampled.min()
+    downsampled[np.where(downsampled > 0)] = 1.0
     return torch.Tensor(downsampled).view(batch_size, 1, 32, 32).cuda()
 
 def get_batch(batch_size):
     global env
     global prev_states
-    num_actions = 4
+    num_actions = 6
     if env is None:
         env = MultiEnvironment('Pong-v0', batch_size)
         actions = np.random.randint(0, num_actions, size=batch_size)
@@ -328,8 +328,8 @@ def clip_gradients(network, val):
 
 def main():
     # ok now, can the network learn the task?
-    latent_size = 4
-    num_actions = 4
+    latent_size = 8
+    num_actions = 6
     batch_size = 32
     encoder = Encoder(latent_size)
     decoder = Decoder(latent_size)
@@ -340,12 +340,12 @@ def main():
     opt_transition = optim.Adam(transition.parameters(), lr=0.001)
     opt_discriminator = optim.Adam(discriminator.parameters(), lr=0.01)
 
-    iters = 10 * 1000
+    iters = 5 * 1000
     ts = TimeSeries('Training', iters)
 
     vid = imutil.VideoMaker('causal_model.mp4')
     for i in range(iters):
-
+        """
         # First train the discriminator
         for j in range(3):
             opt_discriminator.zero_grad()
@@ -372,7 +372,7 @@ def main():
         disc_loss.backward()
         clip_gradients(decoder, .01)
         #opt_decoder.step()
-
+        """
 
         # Now train the autoencoder
         opt_encoder.zero_grad()
@@ -387,23 +387,24 @@ def main():
         z_prime = transition(z, actions)
         predicted = decoder(z_prime)
 
-        #pred_loss = F.binary_cross_entropy(predicted, target)
-        pred_loss = torch.mean((predicted - target) ** 2)
+        pred_loss = F.binary_cross_entropy(predicted, target)
+        #pred_loss = torch.mean((predicted - target) ** 2)
         ts.collect('Reconstruction loss', pred_loss)
 
+        """
         l1_scale = (10.0 * i) / iters
         l1_loss = 0.
         l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
         l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
         ts.collect('Sparsity loss', l1_loss)
+        """
 
-        loss = pred_loss + l1_loss
+        loss = pred_loss
 
         loss.backward()
         opt_encoder.step()
         opt_decoder.step()
         opt_transition.step()
-
 
         if i % 1000 == 0:
             filename = 'iter_{:06}_reconstruction.jpg'.format(i)
