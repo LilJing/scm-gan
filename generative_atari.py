@@ -200,8 +200,8 @@ class Transition(nn.Module):
         super().__init__()
         # Input: State + Action
         # Output: State
-        self.fc1 = nn.Linear(latent_size + num_actions, 16, bias=False)
-        self.fc2 = nn.Linear(16, latent_size, bias=False)
+        self.fc1 = nn.Linear(latent_size + num_actions, 32, bias=False)
+        self.fc2 = nn.Linear(32, latent_size, bias=False)
         # one-layer version
         #self.fc1 = nn.Linear(5, 4)
         self.cuda()
@@ -212,7 +212,6 @@ class Transition(nn.Module):
         x = self.fc1(x)
         x = F.leaky_relu(x, 0.2)
         x = self.fc2(x)
-        x = torch.tanh(x)
         # Fern hack: Predict a delta/displacement
         return z + x
 
