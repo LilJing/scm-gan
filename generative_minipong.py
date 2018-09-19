@@ -356,7 +356,7 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
             zp = z.clone()
             zp[:, i] = val
             caption = "z{}={:.3f}".format(i, val)
-            vid.write_frame(decoder(zp), caption=caption, resize_to=(512,512))
+            vid.write_frame(decoder(zp), caption=caption)
         vid.finish()
     print('Finished generating videos in {:03f}s'.format(time.time() - start_time))
 
@@ -397,6 +397,8 @@ for i in range(iters):
         ts.collect('Disc real loss', disc_real)
         ts.collect('Disc fake loss', disc_fake)
         ts.collect('Discriminator loss', disc_loss)
+        pixel_variance = fake.var(0).mean()
+        ts.collect('Generated pixel variance', pixel_variance)
         disc_loss.backward()
         clip_gradients(discriminator, 1)
         opt_discriminator.step()
@@ -408,6 +410,7 @@ for i in range(iters):
     disc_loss = .01 * torch.relu(1 + discriminator(fake)).sum()
     ts.collect('Gen. Disc loss', disc_loss)
     disc_loss.backward()
+    clip_gradients(decoder, 1)
     opt_decoder.step()
 
 
