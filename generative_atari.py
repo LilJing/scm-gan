@@ -320,7 +320,8 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
 
 def clip_gradients(network, val):
     for W in network.parameters():
-        W.grad.clamp_(-val, val)
+        if W.grad is not None:
+            W.grad.clamp_(-val, val)
 
 
 def main():
@@ -385,8 +386,8 @@ def main():
         z_prime = transition(z, actions)
         predicted = decoder(z_prime)
 
-        pred_loss = F.binary_cross_entropy(predicted, target)
-        #pred_loss = torch.mean((predicted - target) ** 2)
+        #pred_loss = F.binary_cross_entropy(predicted, target)
+        pred_loss = torch.mean((predicted - target) ** 2)
         ts.collect('Reconstruction loss', pred_loss)
 
         l1_scale = (10.0 * i) / iters
