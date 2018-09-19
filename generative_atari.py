@@ -1,5 +1,3 @@
-# A variational autoencoder with some structural causal model stuff
-# Uses a fake environment that looks sort of like Pong
 import time
 import os
 import json
@@ -18,7 +16,7 @@ prev_states = None
 
 def convert_pong(img_batch):
     batch_size = len(img_batch)
-    cropped = np.array(img_batch)[:,30:-20].mean(-1)
+    cropped = np.array(img_batch)[:,32:-18].mean(-1)
     downsampled = np.array([block_reduce(c, (5,5), np.max) for c in cropped])
     downsampled = downsampled - downsampled.min()
     downsampled /= downsampled.max()
@@ -125,19 +123,15 @@ class Discriminator(nn.Module):
         #x = x.unsqueeze(1)
         # batch x 1 x 32 x 32
         x = self.conv1(x)
-        x = self.bn1(x)
         x = F.leaky_relu(x, 0.2)
 
         x = self.conv2(x)
-        x = self.bn2(x)
         x = F.leaky_relu(x, 0.2)
 
         x = self.conv3(x)
-        x = self.bn3(x)
         x = F.leaky_relu(x, 0.2)
 
         x = self.conv4(x)
-        x = self.bn4(x)
         x = F.leaky_relu(x, 0.2)
 
         x = x.view(-1, 64*4*4)
@@ -329,98 +323,102 @@ def clip_gradients(network, val):
         W.grad.clamp_(-val, val)
 
 
-# ok now, can the network learn the task?
-latent_size = 4
-num_actions = 4
-batch_size = 32
-encoder = Encoder(latent_size)
-decoder = Decoder(latent_size)
-discriminator = Discriminator()
-transition = Transition(latent_size, num_actions)
-opt_encoder = optim.Adam(encoder.parameters(), lr=0.001)
-opt_decoder = optim.Adam(decoder.parameters(), lr=0.001)
-opt_transition = optim.Adam(transition.parameters(), lr=0.001)
-opt_discriminator = optim.Adam(discriminator.parameters(), lr=0.01)
+def main():
+    # ok now, can the network learn the task?
+    latent_size = 4
+    num_actions = 4
+    batch_size = 32
+    encoder = Encoder(latent_size)
+    decoder = Decoder(latent_size)
+    discriminator = Discriminator()
+    transition = Transition(latent_size, num_actions)
+    opt_encoder = optim.Adam(encoder.parameters(), lr=0.001)
+    opt_decoder = optim.Adam(decoder.parameters(), lr=0.001)
+    opt_transition = optim.Adam(transition.parameters(), lr=0.001)
+    opt_discriminator = optim.Adam(discriminator.parameters(), lr=0.01)
 
-iters = 30 * 1000
-ts = TimeSeries('Training', iters)
+    iters = 30 * 1000
+    ts = TimeSeries('Training', iters)
 
-vid = imutil.VideoMaker('causal_model.mp4')
-for i in range(iters):
+    vid = imutil.VideoMaker('causal_model.mp4')
+    for i in range(iters):
 
-    # First train the discriminator
-    for j in range(3):
-        opt_discriminator.zero_grad()
-        _, _, real = get_batch(batch_size)
-        random_z = torch.zeros(batch_size, latent_size).normal_(1, 1).cuda()
-        fake = decoder(random_z)
-        disc_real = torch.relu(1 + discriminator(real)).sum()
-        disc_fake = torch.relu(1 - discriminator(fake)).sum()
-        disc_loss = disc_real + disc_fake
+        # First train the discriminator
+        for j in range(3):
+            opt_discriminator.zero_grad()
+            _, _, real = get_batch(batch_size)
+            random_z = torch.zeros(batch_size, latent_size).normal_(1, 1).cuda()
+            fake = decoder(random_z)
+            disc_real = torch.relu(1 + discriminator(real)).sum()
+            disc_fake = torch.relu(1 - discriminator(fake)).sum()
+            disc_loss = disc_real + disc_fake
+            disc_loss.backward()
+            clip_gradients(discriminator, 1)
+            opt_discriminator.step()
+        pixel_variance = fake.var(0).mean()
         ts.collect('Disc real loss', disc_real)
         ts.collect('Disc fake loss', disc_fake)
         ts.collect('Discriminator loss', disc_loss)
-        pixel_variance = fake.var(0).mean()
         ts.collect('Generated pixel variance', pixel_variance)
+
+        # Apply discriminator loss for realism
+        opt_decoder.zero_grad()
+        random_z = torch.zeros(batch_size, latent_size).normal_(1, 1).cuda()
+        fake = decoder(random_z)
+        disc_loss = .01 * torch.relu(1 + discriminator(fake)).sum()
+        ts.collect('Gen. Disc loss', disc_loss)
         disc_loss.backward()
-        clip_gradients(discriminator, 1)
-        opt_discriminator.step()
-
-    # Apply discriminator loss for realism
-    opt_decoder.zero_grad()
-    random_z = torch.zeros(batch_size, latent_size).normal_(1, 1).cuda()
-    fake = decoder(random_z)
-    disc_loss = .01 * torch.relu(1 + discriminator(fake)).sum()
-    ts.collect('Gen. Disc loss', disc_loss)
-    disc_loss.backward()
-    clip_gradients(decoder, 1)
-    opt_decoder.step()
+        clip_gradients(decoder, 1)
+        opt_decoder.step()
 
 
-    # Now train the autoencoder
-    opt_encoder.zero_grad()
-    opt_decoder.zero_grad()
-    opt_transition.zero_grad()
+        # Now train the autoencoder
+        opt_encoder.zero_grad()
+        opt_decoder.zero_grad()
+        opt_transition.zero_grad()
 
-    before, actions, target = get_batch(batch_size)
+        before, actions, target = get_batch(batch_size)
 
-    # Just try to autoencode
-    z = encoder(before)
+        # Just try to autoencode
+        z = encoder(before)
 
-    z_prime = transition(z, actions)
-    predicted = decoder(z_prime)
+        z_prime = transition(z, actions)
+        predicted = decoder(z_prime)
 
-    pred_loss = F.binary_cross_entropy(predicted, target)
-    #pred_loss = torch.mean((predicted - target) ** 2)
-    ts.collect('Reconstruction loss', pred_loss)
+        pred_loss = F.binary_cross_entropy(predicted, target)
+        #pred_loss = torch.mean((predicted - target) ** 2)
+        ts.collect('Reconstruction loss', pred_loss)
 
-    l1_scale = (10.0 * i) / iters
-    l1_loss = 0.
-    l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
-    l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
-    ts.collect('Sparsity loss', l1_loss)
+        l1_scale = (10.0 * i) / iters
+        l1_loss = 0.
+        l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
+        l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
+        ts.collect('Sparsity loss', l1_loss)
 
-    loss = pred_loss + l1_loss
+        loss = pred_loss + l1_loss
 
-    loss.backward()
-    opt_encoder.step()
-    opt_decoder.step()
-    opt_transition.step()
-
-
-    if i % 1000 == 0:
-        filename = 'iter_{:06}_reconstruction.jpg'.format(i)
-        img = torch.cat([target, predicted])
-        imutil.show(img, filename=filename)
-
-        scm = compute_causal_graph(transition, latent_size, num_actions)
-        caption = 'Prediction Loss {:.03f}'.format(pred_loss)
-        vid.write_frame(render_causal_graph(scm), caption=caption)
-
-        demo_latent_video(before[:9], encoder, decoder, transition, latent_size, num_actions, epoch=i)
-    ts.print_every(1)
+        loss.backward()
+        opt_encoder.step()
+        opt_decoder.step()
+        opt_transition.step()
 
 
-vid.finish()
+        if i % 1000 == 0:
+            filename = 'iter_{:06}_reconstruction.jpg'.format(i)
+            img = torch.cat([target, predicted])
+            imutil.show(img, filename=filename)
 
-print(ts)
+            scm = compute_causal_graph(transition, latent_size, num_actions)
+            caption = 'Prediction Loss {:.03f}'.format(pred_loss)
+            vid.write_frame(render_causal_graph(scm), caption=caption)
+
+            demo_latent_video(before[:9], encoder, decoder, transition, latent_size, num_actions, epoch=i)
+        ts.print_every(1)
+
+
+    vid.finish()
+    print(ts)
+
+
+if __name__ == '__main__':
+    main()
