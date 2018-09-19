@@ -14,6 +14,7 @@ from skimage.measure import block_reduce
 latent_size = 8
 num_actions = 6
 batch_size = 32
+iters = 10 * 1000
 
 env = None
 prev_states = None
@@ -320,7 +321,8 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
             zp = z.clone()
             zp[:, i] = val
             caption = "z{}={:.3f}".format(i, val)
-            vid.write_frame(decoder(zp), caption=caption)
+            img = decoder(zp)
+            vid.write_frame(img, caption=caption, resize_to=(256,256))
         vid.finish()
     print('Finished generating videos in {:03f}s'.format(time.time() - start_time))
 
@@ -342,7 +344,6 @@ def main():
     opt_transition = optim.Adam(transition.parameters(), lr=0.001)
     opt_discriminator = optim.Adam(discriminator.parameters(), lr=0.01)
 
-    iters = 5 * 1000
     ts = TimeSeries('Training', iters)
 
     vid = imutil.VideoMaker('causal_model.mp4')
@@ -391,13 +392,11 @@ def main():
         #pred_loss = torch.mean((predicted - target) ** 2)
         ts.collect('Reconstruction loss', pred_loss)
 
-        """
         l1_scale = (10.0 * i) / iters
         l1_loss = 0.
         l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
         l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
         ts.collect('Sparsity loss', l1_loss)
-        """
 
         loss = pred_loss
 
@@ -406,17 +405,18 @@ def main():
         opt_decoder.step()
         opt_transition.step()
 
-        if i % 1000 == 0:
+        if i % 100 == 0:
             filename = 'iter_{:06}_reconstruction.jpg'.format(i)
             img = torch.cat([target[:4], predicted[:4]])
             imutil.show(img, filename=filename)
 
             scm = compute_causal_graph(transition, latent_size, num_actions)
-            caption = 'Prediction Loss {:.03f}'.format(pred_loss)
+            caption = 'Iteration {} Prediction Loss {:.03f}'.format(i, pred_loss)
             vid.write_frame(render_causal_graph(scm), caption=caption)
 
+        if i % 1000 == 0:
             demo_latent_video(before[:9], encoder, decoder, transition, latent_size, num_actions, epoch=i)
-        ts.print_every(1)
+        ts.print_every(2)
 
 
     vid.finish()
