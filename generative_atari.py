@@ -348,8 +348,7 @@ def main():
         for j in range(3):
             opt_discriminator.zero_grad()
             _, _, real = get_batch(batch_size)
-            random_z = torch.zeros(batch_size, latent_size).normal_(1, 1).cuda()
-            fake = decoder(random_z)
+            fake = decoder(encoder(real))
             disc_real = torch.relu(1 + discriminator(real)).sum()
             disc_fake = torch.relu(1 - discriminator(fake)).sum()
             disc_loss = disc_real + disc_fake
@@ -364,8 +363,8 @@ def main():
 
         # Apply discriminator loss for realism
         opt_decoder.zero_grad()
-        random_z = torch.zeros(batch_size, latent_size).normal_(1, 1).cuda()
-        fake = decoder(random_z)
+        _, _, real = get_batch(batch_size)
+        fake = decoder(encoder(real))
         disc_loss = .01 * torch.relu(1 + discriminator(fake)).sum()
         ts.collect('Gen. Disc loss', disc_loss)
         disc_loss.backward()
