@@ -11,18 +11,21 @@ from logutil import TimeSeries
 from atari import MultiEnvironment
 from skimage.measure import block_reduce
 
+latent_size = 8
+num_actions = 6
+batch_size = 32
+
 env = None
 prev_states = None
 
 def convert_pong(img_batch):
-    batch_size = len(img_batch)
     cropped = np.array(img_batch)[:,34:-16].mean(-1)
     downsampled = np.array([block_reduce(c, (5,5), np.max) for c in cropped])
     downsampled -= downsampled.min()
     downsampled[np.where(downsampled > 0)] = 1.0
     return torch.Tensor(downsampled).view(batch_size, 1, 32, 32).cuda()
 
-def get_batch(batch_size):
+def get_batch():
     global env
     global prev_states
     num_actions = 6
@@ -39,7 +42,9 @@ def get_batch(batch_size):
     action_tensor = torch.Tensor(batch_size, num_actions).zero_().cuda()
     for i in range(batch_size):
         action_tensor[i][actions[i]] = 1.0
-    return prev_states, action_tensor, states
+    results = (prev_states, action_tensor, states)
+    prev_states = states
+    return results
 
 
 # ok now we build a neural network
@@ -328,9 +333,6 @@ def clip_gradients(network, val):
 
 def main():
     # ok now, can the network learn the task?
-    latent_size = 8
-    num_actions = 6
-    batch_size = 32
     encoder = Encoder(latent_size)
     decoder = Decoder(latent_size)
     discriminator = Discriminator()
@@ -379,11 +381,9 @@ def main():
         opt_decoder.zero_grad()
         opt_transition.zero_grad()
 
-        before, actions, target = get_batch(batch_size)
+        before, actions, target = get_batch()
 
-        # Just try to autoencode
         z = encoder(before)
-
         z_prime = transition(z, actions)
         predicted = decoder(z_prime)
 
@@ -408,7 +408,7 @@ def main():
 
         if i % 1000 == 0:
             filename = 'iter_{:06}_reconstruction.jpg'.format(i)
-            img = torch.cat([target, predicted])
+            img = torch.cat([target[:4], predicted[:4]])
             imutil.show(img, filename=filename)
 
             scm = compute_causal_graph(transition, latent_size, num_actions)
