@@ -407,8 +407,8 @@ def main():
 
         if i % 100 == 0:
             filename = 'iter_{:06}_reconstruction.jpg'.format(i)
-            img = torch.cat([target[:4], predicted[:4]])
-            imutil.show(img, filename=filename)
+            img = torch.cat([target[:2], predicted[:2]])
+            imutil.show(img, filename=filename, resize_to=(256,256))
 
             scm = compute_causal_graph(transition, latent_size, num_actions)
             caption = 'Iteration {} Prediction Loss {:.03f}'.format(i, pred_loss)
