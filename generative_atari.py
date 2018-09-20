@@ -320,7 +320,7 @@ def main():
         l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
         ts.collect('Sparsity loss', l1_loss)
 
-        loss = pred_loss
+        loss = pred_loss + l1_loss
 
         loss.backward()
         opt_encoder.step()
