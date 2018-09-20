@@ -255,6 +255,12 @@ def clip_gradients(network, val):
             W.grad.clamp_(-val, val)
 
 
+def clip_weights(network, val):
+    for W in network.parameters():
+        if W.data is not None:
+            W.data.clamp_(-val, val)
+
+
 def main():
     # ok now, can the network learn the task?
     encoder = Encoder(latent_size)
@@ -287,6 +293,7 @@ def main():
         ts.collect('Disc fake loss', disc_fake)
         ts.collect('Discriminator loss', disc_loss)
         ts.collect('Generated pixel variance', pixel_variance)
+        clip_weights(discriminator, .01)
 
         # Apply discriminator loss for realism
         opt_decoder.zero_grad()
