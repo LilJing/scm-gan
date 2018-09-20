@@ -19,27 +19,21 @@ iters = 10 * 1000
 env = None
 prev_states = None
 
-def convert_pong(img_batch):
-    cropped = np.array(img_batch)[:,34:-16].mean(-1)
-    downsampled = np.array([block_reduce(c, (5,5), np.max) for c in cropped])
-    downsampled -= downsampled.min()
-    downsampled[np.where(downsampled > 0)] = 1.0
-    return torch.Tensor(downsampled).view(batch_size, 1, 32, 32).cuda()
 
 def get_batch():
     global env
     global prev_states
     num_actions = 6
     if env is None:
-        env = MultiEnvironment('Pong-v0', batch_size)
+        env = MultiEnvironment('PongDeterministic-v4', batch_size)
         actions = np.random.randint(0, num_actions, size=batch_size)
         prev_states, rewards, dones, infos = env.step(actions)
-        prev_states = convert_pong(prev_states)
+        prev_states = torch.Tensor(prev_states).cuda()
 
     actions = np.random.randint(0, num_actions, size=batch_size)
     states, rewards, dones, infos = env.step(actions)
-    states = convert_pong(states)
 
+    states = torch.Tensor(states).cuda()
     action_tensor = torch.Tensor(batch_size, num_actions).zero_().cuda()
     for i in range(batch_size):
         action_tensor[i][actions[i]] = 1.0
@@ -59,7 +53,7 @@ class Encoder(nn.Module):
         super().__init__()
         self.latent_size = latent_size
         # 1x32x32
-        self.conv1 = nn.Conv2d(1, 32, 3, stride=1, padding=1)
+        self.conv1 = nn.Conv2d(3, 32, 3, stride=1, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         # 32x32x32
         self.conv2 = nn.Conv2d(32, 64, 4, stride=2, padding=1)
@@ -108,7 +102,7 @@ class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
         # 1x32x32
-        self.conv1 = nn.Conv2d(1, 32, 3, stride=1, padding=1)
+        self.conv1 = nn.Conv2d(3, 32, 3, stride=1, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         # 32x32x32
         self.conv2 = nn.Conv2d(32, 64, 4, stride=2, padding=1)
@@ -172,7 +166,7 @@ class Decoder(nn.Module):
         self.deconv4 = nn.ConvTranspose2d(64, 64, 4, stride=2, padding=1)
         self.bn4 = nn.BatchNorm2d(64)
         # 16 x 32 x 32
-        self.deconv5 = nn.ConvTranspose2d(64, 1, 3, stride=1, padding=1)
+        self.deconv5 = nn.ConvTranspose2d(64, 3, 3, stride=1, padding=1)
         self.cuda()
 
     def forward(self, z):
@@ -348,11 +342,10 @@ def main():
 
     vid = imutil.VideoMaker('causal_model.mp4')
     for i in range(iters):
-        """
         # First train the discriminator
         for j in range(3):
             opt_discriminator.zero_grad()
-            _, _, real = get_batch(batch_size)
+            _, _, real = get_batch()
             fake = decoder(encoder(real))
             disc_real = torch.relu(1 + discriminator(real)).sum()
             disc_fake = torch.relu(1 - discriminator(fake)).sum()
@@ -368,14 +361,13 @@ def main():
 
         # Apply discriminator loss for realism
         opt_decoder.zero_grad()
-        _, _, real = get_batch(batch_size)
+        _, _, real = get_batch()
         fake = decoder(encoder(real))
         disc_loss = .01 * torch.relu(1 + discriminator(fake)).sum()
         ts.collect('Gen. Disc loss', disc_loss)
         disc_loss.backward()
         clip_gradients(decoder, .01)
-        #opt_decoder.step()
-        """
+        opt_decoder.step()
 
         # Now train the autoencoder
         opt_encoder.zero_grad()
