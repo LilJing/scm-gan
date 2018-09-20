@@ -18,6 +18,9 @@ class MultiEnvironment():
         #self.envs = map_fn(lambda idx: gym.make(name), range(batch_size))
         # ALE is non-threadsafe
         self.envs = [gym.make(name) for i in range(batch_size)]
+        # Disable frameskip
+        for env in self.envs:
+            env.unwrapped.frameskip = 1
         self.reset()
         print('Initialized {} environments in {:.03f}s'.format(self.batch_size, time.time() - start_time))
 
