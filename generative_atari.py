@@ -12,7 +12,7 @@ from atari import MultiEnvironment
 from causal_graph import compute_causal_graph, render_causal_graph
 from skimage.measure import block_reduce
 
-latent_size = 6
+latent_size = 4
 num_actions = 6
 batch_size = 32
 iters = 40 * 1000
@@ -321,7 +321,7 @@ def main():
         #pred_loss = torch.mean((predicted - target) ** 2)
         ts.collect('Reconstruction loss', pred_loss)
 
-        l1_scale = (10.0 * i) / iters
+        l1_scale = (1.0 * i) / iters
         l1_loss = 0.
         l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
         l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
@@ -337,7 +337,8 @@ def main():
         if i % 100 == 0:
             filename = 'iter_{:06}_reconstruction.jpg'.format(i)
             img = torch.cat([target[:2], predicted[:2]])
-            imutil.show(img, filename=filename, resize_to=(256,256))
+            caption = 'iter {}: top orig. bot recon.'.format(i)
+            imutil.show(img, filename=filename, resize_to=(256,256), img_padding=10, caption=caption)
 
             scm = compute_causal_graph(transition, latent_size, num_actions)
             caption = 'Iteration {} Prediction Loss {:.03f}'.format(i, pred_loss)
