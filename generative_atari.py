@@ -12,10 +12,10 @@ from atari import MultiEnvironment
 from causal_graph import compute_causal_graph, render_causal_graph
 from skimage.measure import block_reduce
 
-latent_size = 8
+latent_size = 6
 num_actions = 6
 batch_size = 32
-iters = 10 * 1000
+iters = 40 * 1000
 
 env = None
 prev_states = None
@@ -244,7 +244,7 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
             zp[:, i] = val
             caption = "z{}={:.3f}".format(i, val)
             img = decoder(zp)
-            vid.write_frame(img, caption=caption, resize_to=(256,256))
+            vid.write_frame(img, caption=caption, resize_to=(256,256), img_padding=10)
         vid.finish()
     print('Finished generating videos in {:03f}s'.format(time.time() - start_time))
 
