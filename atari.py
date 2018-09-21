@@ -12,21 +12,22 @@ def map_fn(fn, *iterables):
 
 
 class MultiEnvironment():
-    def __init__(self, name, batch_size):
+    def __init__(self, name, batch_size, frameskip=2):
         start_time = time.time()
         self.batch_size = batch_size
+
+        # TODO: ALE is non-threadsafe https://github.com/openai/gym/issues/281
         #self.envs = map_fn(lambda idx: gym.make(name), range(batch_size))
-        # ALE is non-threadsafe
         self.envs = [gym.make(name) for i in range(batch_size)]
-        # Disable frameskip
+
+        # Set frameskip
         for env in self.envs:
-            env.unwrapped.frameskip = 2
+            env.unwrapped.frameskip = frameskip
         self.reset()
         print('Initialized {} environments in {:.03f}s'.format(self.batch_size, time.time() - start_time))
 
     def reset(self):
-        for env in self.envs:
-            reset_env(env)
+        map_fn(lambda x: reset_env(x), self.envs)
 
     def step(self, actions):
         start_time = time.time()
@@ -49,6 +50,10 @@ class MultiEnvironment():
         states, rewards, dones, infos = zip(*results)
         return states, rewards, dones, infos
 
+    # Pass-through for eg. env.action_space, env.observation_space
+    def __getattr__(self, name):
+        return getattr(self.envs[0].unwrapped, name)
+
 
 def reset_env(env):
     # Pong: wait until the enemy paddle appears
@@ -69,11 +74,25 @@ def convert_pong(img_sequence):
     return pixels
 
 
+def convert_breakout(img_sequence):
+    from skimage.measure import block_reduce
+    pixels = img_sequence.mean(-1)  # Convert to monochrome
+    pixels = np.array(pixels)[:,50:,:]  # Crop along height dimension
+    # Downsample to 80x80x3
+    pixels = np.array([block_reduce(frame, (2,2), np.max) for frame in pixels])
+    pixels -= pixels.min()
+    pixels[np.where(pixels > 0)] = 1.0  # Binarize
+    return pixels
+
+
 if __name__ == '__main__':
-    batch_size = 64
-    env = MultiEnvironment('Pong-v0', batch_size)
-    for i in range(10):
-        actions = np.random.randint(0, 4, size=batch_size)
+    batch_size = 8
+    env = MultiEnvironment('Breakout-v0', batch_size, frameskip=4)
+    num_actions = env.action_space.n
+    for i in range(100):
+        actions = np.random.randint(0, num_actions, batch_size)
         states, rewards, dones, infos = env.step(actions)
-        imutil.show(states[:4])
+        import torch
+        imutil.show(torch.Tensor(states[:4]))
+        time.sleep(1)
 
