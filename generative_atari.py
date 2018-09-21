@@ -12,7 +12,7 @@ from atari import MultiEnvironment
 from causal_graph import compute_causal_graph, render_causal_graph
 from skimage.measure import block_reduce
 
-latent_size = 4
+latent_size = 5
 num_actions = 6
 batch_size = 32
 iters = 40 * 1000
@@ -153,6 +153,7 @@ class Decoder(nn.Module):
         self.latent_size = latent_size
         self.fc1 = nn.Linear(latent_size, 128)
         self.bn0 = nn.BatchNorm1d(128)
+
         self.fc2 = nn.Linear(128, 256)
 
         self.deconv1 = nn.ConvTranspose2d(256, 128, 4, stride=1)
@@ -163,10 +164,10 @@ class Decoder(nn.Module):
         # 64 x 8 x 8
         self.deconv3 = nn.ConvTranspose2d(64, 64, 4, stride=2, padding=1)
         self.bn3 = nn.BatchNorm2d(64)
-        # 32 x 16 x 16
+        # 64 x 16 x 16
         self.deconv4 = nn.ConvTranspose2d(64, 64, 4, stride=2, padding=1)
         self.bn4 = nn.BatchNorm2d(64)
-        # 16 x 32 x 32
+        # 64 x 32 x 32
         self.deconv5 = nn.ConvTranspose2d(64, 3, 3, stride=1, padding=1)
         self.cuda()
 
@@ -174,6 +175,7 @@ class Decoder(nn.Module):
         x = self.fc1(z)
         x = F.leaky_relu(x, 0.2)
         x = self.bn0(x)
+
         x = self.fc2(x)
         x = F.leaky_relu(x, 0.2)
 
@@ -204,8 +206,8 @@ class Transition(nn.Module):
         super().__init__()
         # Input: State + Action
         # Output: State
-        self.fc1 = nn.Linear(latent_size + num_actions, 32, bias=False)
-        self.fc2 = nn.Linear(32, latent_size, bias=False)
+        self.fc1 = nn.Linear(latent_size + num_actions, 128)
+        self.fc2 = nn.Linear(128, latent_size, bias=False)
         # one-layer version
         #self.fc1 = nn.Linear(5, 4)
         self.cuda()
