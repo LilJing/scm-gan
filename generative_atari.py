@@ -24,7 +24,6 @@ prev_states = None
 def get_batch():
     global env
     global prev_states
-    num_actions = 6
     if env is None:
         env = MultiEnvironment('PongDeterministic-v4', batch_size)
         actions = np.random.randint(0, num_actions, size=batch_size)
