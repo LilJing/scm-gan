@@ -12,11 +12,12 @@ from atari import MultiEnvironment
 from causal_graph import compute_causal_graph, render_causal_graph
 from skimage.measure import block_reduce
 
-latent_size = 10
+latent_size = 6
 l1_power = 1.0
+disc_power = .001
 num_actions = 6
 batch_size = 32
-iters = 1000 * 1000
+iters = 100 * 1000
 
 env = None
 prev_states = None
@@ -102,49 +103,23 @@ class Encoder(nn.Module):
 class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
-        # 1x32x32
-        self.conv1 = nn.Conv2d(3, 32, 3, stride=1, padding=1)
-        self.bn1 = nn.BatchNorm2d(32)
-        # 32x32x32
-        self.conv2 = nn.Conv2d(32, 64, 4, stride=2, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
-        # 64x16x16
-        self.conv3 = nn.Conv2d(64, 64, 4, stride=2, padding=1)
-        self.bn3 = nn.BatchNorm2d(64)
-        # 64x8x8
-        self.conv4 = nn.Conv2d(64, 64, 4, stride=2, padding=1)
-        self.bn4 = nn.BatchNorm2d(64)
-        # 64x4x4
-        self.fc1 = nn.Linear(64*4*4, 128)
-        self.fc2 = nn.Linear(128 * 2, 1)
+        self.fc1a = nn.Linear(32, 128)
+        self.fc1b = nn.Linear(32, 128)
+        self.fc2 = nn.Linear(256, 1)
         self.cuda()
 
     def forward(self, x):
-        # Input: batch x 32 x 32
-        #x = x.unsqueeze(1)
-        # batch x 1 x 32 x 32
-        x = self.conv1(x)
+        # A constrained discriminator
+        # It can see only projections, 1D shadows of the 2D input
+
+        # Input: batch x 3 x 32 x 32
+        x = x.mean(dim=1)
+        latitude = self.fc1a(x.mean(dim=1))
+        longitude = self.fc1a(x.mean(dim=2))
+        x = torch.cat([latitude, longitude], dim=1)
         x = F.leaky_relu(x, 0.2)
-        x = self.bn1(x)
-
-        x = self.conv2(x)
-        x = F.leaky_relu(x, 0.2)
-        x = self.bn2(x)
-
-        x = self.conv3(x)
-        x = F.leaky_relu(x, 0.2)
-        x = self.bn3(x)
-
-        x = self.conv4(x)
-        x = F.leaky_relu(x, 0.2)
-
-        x = x.view(-1, 64*4*4)
-        x = self.fc1(x)
-
-        # Minibatch Standard Deviation from Karras et al
-        augmented = torch.cat([x, torch.var(x, dim=0).expand(32, 128)], 1)
-        scores = self.fc2(augmented)
-        return scores
+        x = self.fc2(x)
+        return x
 
 
 class Decoder(nn.Module):
@@ -206,8 +181,8 @@ class Transition(nn.Module):
         super().__init__()
         # Input: State + Action
         # Output: State
-        self.fc1 = nn.Linear(latent_size + num_actions, 128)
-        self.fc2 = nn.Linear(128, latent_size, bias=False)
+        self.fc1 = nn.Linear(latent_size + num_actions, latent_size*2)
+        self.fc2 = nn.Linear(latent_size*2, latent_size, bias=False)
         # one-layer version
         #self.fc1 = nn.Linear(5, 4)
         self.cuda()
@@ -252,6 +227,27 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
     print('Finished generating videos in {:03f}s'.format(time.time() - start_time))
 
 
+def demo_interpolation_video(before, encoder, decoder, transition, latent_size, num_actions, epoch=0):
+    start_time = time.time()
+
+    # Take the first two images and interpolate between them
+    z = encoder(before[:2])
+    start_z = z[0]
+    end_z = z[1]
+
+    vid_filename = 'iter_{:06d}_interp'.format(epoch)
+    vid = imutil.VideoLoop(vid_filename)
+    for i in range(latent_size):
+        for j in range(60):
+            val = 1.0 * j / N
+            zp = val * end_z + (1 - val) * start_z
+            img = decoder(zp)
+            caption = "Interp {:.3f}".format(val)
+            vid.write_frame(img, caption=caption, resize_to=(256,256))
+    vid.finish()
+    print('Finished generating interpolation in {:03f}s'.format(time.time() - start_time))
+
+
 def clip_gradients(network, val):
     for W in network.parameters():
         if W.grad is not None:
@@ -279,7 +275,6 @@ def main():
 
     vid = imutil.VideoMaker('causal_model.mp4')
     for i in range(iters):
-        """
         # First train the discriminator
         for j in range(3):
             opt_discriminator.zero_grad()
@@ -302,12 +297,11 @@ def main():
         opt_decoder.zero_grad()
         _, _, real = get_batch()
         fake = decoder(encoder(real))
-        disc_loss = .01 * torch.relu(1 + discriminator(fake)).sum()
+        disc_loss = disc_power * torch.relu(1 + discriminator(fake)).sum()
         ts.collect('Gen. Disc loss', disc_loss)
         disc_loss.backward()
         clip_gradients(decoder, .01)
         opt_decoder.step()
-        """
 
         # Now train the autoencoder
         opt_encoder.zero_grad()
@@ -320,8 +314,8 @@ def main():
         z_prime = transition(z, actions)
         predicted = decoder(z_prime)
 
-        pred_loss = F.binary_cross_entropy(predicted, target)
-        #pred_loss = torch.mean((predicted - target) ** 2)
+        #pred_loss = F.binary_cross_entropy(predicted, target)
+        pred_loss = torch.mean((predicted - target) ** 2)
         ts.collect('Reconstruction loss', pred_loss)
 
         l1_scale = (l1_power * i) / iters
@@ -350,6 +344,7 @@ def main():
 
         if i % 1000 == 0:
             demo_latent_video(before[:9], encoder, decoder, transition, latent_size, num_actions, epoch=i)
+            demo_interpolation_video(before[:2], encoder, decoder, transition, latent_size, num_actions, epoch=i)
         ts.print_every(2)
 
 
