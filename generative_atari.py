@@ -12,10 +12,11 @@ from atari import MultiEnvironment
 from causal_graph import compute_causal_graph, render_causal_graph
 from skimage.measure import block_reduce
 
-latent_size = 5
+latent_size = 10
+l1_power = 1.0
 num_actions = 6
 batch_size = 32
-iters = 40 * 1000
+iters = 1000 * 1000
 
 env = None
 prev_states = None
@@ -231,12 +232,13 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
         actions[i, a] = 1
 
     prev_z = encoder(before)
-    z = transition(prev_z, actions)
+    #z = transition(prev_z, actions)
+    z = prev_z
     for i in range(latent_size):
         vid_filename = 'iter_{:06d}_dim_{:02d}'.format(epoch, i)
         vid = imutil.VideoLoop(vid_filename)
-        dim_min = z.min(dim=1)[0][i] - 1.
-        dim_max = z.max(dim=1)[0][i] + 1.
+        dim_min = z[:,i].min().item()
+        dim_max = z[:,i].max().item()
         N = 60
         for j in range(N):
             dim_range = dim_max - dim_min
@@ -268,10 +270,10 @@ def main():
     decoder = Decoder(latent_size)
     discriminator = Discriminator()
     transition = Transition(latent_size, num_actions)
-    opt_encoder = optim.Adam(encoder.parameters(), lr=0.001)
-    opt_decoder = optim.Adam(decoder.parameters(), lr=0.001)
-    opt_transition = optim.Adam(transition.parameters(), lr=0.001)
-    opt_discriminator = optim.Adam(discriminator.parameters(), lr=0.01)
+    opt_encoder = optim.Adam(encoder.parameters(), lr=0.0001)
+    opt_decoder = optim.Adam(decoder.parameters(), lr=0.0001)
+    opt_transition = optim.Adam(transition.parameters(), lr=0.0001)
+    opt_discriminator = optim.Adam(discriminator.parameters(), lr=0.0001)
 
     ts = TimeSeries('Training', iters)
 
@@ -322,8 +324,9 @@ def main():
         #pred_loss = torch.mean((predicted - target) ** 2)
         ts.collect('Reconstruction loss', pred_loss)
 
-        l1_scale = (1.0 * i) / iters
+        l1_scale = (l1_power * i) / iters
         l1_loss = 0.
+        l1_loss += l1_scale * F.l1_loss(transition.fc1.bias, torch.zeros(transition.fc1.bias.shape).cuda())
         l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
         l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
         ts.collect('Sparsity loss', l1_loss)
