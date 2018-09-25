@@ -232,8 +232,8 @@ def demo_interpolation_video(before, encoder, decoder, transition, latent_size, 
 
     # Take the first two images and interpolate between them
     z = encoder(before[:2])
-    start_z = z[0]
-    end_z = z[1]
+    start_z = z[0:1]
+    end_z = z[1:2]
 
     vid_filename = 'iter_{:06d}_interp'.format(epoch)
     vid = imutil.VideoLoop(vid_filename)
@@ -276,6 +276,10 @@ def main():
 
     vid = imutil.VideoMaker('causal_model.mp4')
     for i in range(iters):
+        encoder.train()
+        decoder.train()
+        discriminator.train()
+        transition.train()
         # First train the discriminator
         for j in range(3):
             opt_discriminator.zero_grad()
@@ -332,6 +336,11 @@ def main():
         opt_encoder.step()
         opt_decoder.step()
         opt_transition.step()
+
+        encoder.eval()
+        decoder.eval()
+        discriminator.eval()
+        transition.eval()
 
         if i % 100 == 0:
             filename = 'iter_{:06}_reconstruction.jpg'.format(i)
