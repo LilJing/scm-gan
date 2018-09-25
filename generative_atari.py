@@ -284,7 +284,7 @@ def main():
             disc_fake = torch.relu(1 - discriminator(fake)).sum()
             disc_loss = disc_real + disc_fake
             disc_loss.backward()
-            clip_gradients(discriminator, 1)
+            #clip_gradients(discriminator, 1)
             opt_discriminator.step()
         pixel_variance = fake.var(0).mean()
         ts.collect('Disc real loss', disc_real)
@@ -300,7 +300,7 @@ def main():
         disc_loss = disc_power * torch.relu(1 + discriminator(fake)).sum()
         ts.collect('Gen. Disc loss', disc_loss)
         disc_loss.backward()
-        clip_gradients(decoder, .01)
+        #clip_gradients(decoder, .01)
         opt_decoder.step()
 
         # Now train the autoencoder
