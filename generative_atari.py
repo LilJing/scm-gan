@@ -17,7 +17,7 @@ l1_power = 1.0
 disc_power = .001
 num_actions = 6
 batch_size = 32
-iters = 100 * 1000
+iters = 300 * 1000
 
 env = None
 prev_states = None
@@ -237,14 +237,20 @@ def demo_interpolation_video(before, encoder, decoder, transition, latent_size, 
 
     vid_filename = 'iter_{:06d}_interp'.format(epoch)
     vid = imutil.VideoLoop(vid_filename)
-    for i in range(latent_size):
-        N = 60
-        for j in range(N):
-            val = 1.0 * j / N
-            zp = val * end_z + (1 - val) * start_z
-            img = decoder(zp)
-            caption = "Interp {:.3f}".format(val)
-            vid.write_frame(img, caption=caption, resize_to=(256,256))
+
+    for _ in range(10):
+        vid.write_frame(before[0], resize_to=(256,256), caption='Start')
+
+    N = 60
+    for j in range(N):
+        val = 1.0 * j / N
+        zp = val * end_z + (1 - val) * start_z
+        img = decoder(zp)
+        caption = "Interp {:.3f}".format(val)
+        vid.write_frame(img, caption=caption, resize_to=(256,256))
+
+    for _ in range(10):
+        vid.write_frame(before[1], resize_to=(256,256), caption='End')
     vid.finish()
     print('Finished generating interpolation in {:03f}s'.format(time.time() - start_time))
 
@@ -280,6 +286,7 @@ def main():
         decoder.train()
         discriminator.train()
         transition.train()
+
         # First train the discriminator
         for j in range(3):
             opt_discriminator.zero_grad()
