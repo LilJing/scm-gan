@@ -38,7 +38,8 @@ class MultiEnvironment():
             cumulative_reward = 0
             for _ in range(3):
                 state, reward, done, info = env.step(action)
-                if done:
+                # Pong: Reset immediately on each score
+                if done or reward:
                     reset_env(env)
                 cumulative_reward += reward
                 new_state.append(state)
@@ -67,8 +68,8 @@ def convert_pong(img_sequence):
     pixels = img_sequence.mean(-1)  # Convert to monochrome
     pixels = np.array(pixels)[:,34:-16,:]  # Crop along height dimension
     assert pixels.shape == (3, 160, 160)
-    # Downsample to 32x32x3
-    pixels = np.array([block_reduce(frame, (5,5), np.max) for frame in pixels])
+    # Downsample to 40x40
+    pixels = np.array([block_reduce(frame, (4,4), np.max) for frame in pixels])
     pixels -= pixels.min()
     pixels[np.where(pixels > 0)] = 1.0  # Binarize
     return pixels
