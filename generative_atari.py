@@ -238,7 +238,8 @@ def demo_interpolation_video(before, encoder, decoder, transition, latent_size, 
     vid_filename = 'iter_{:06d}_interp'.format(epoch)
     vid = imutil.VideoLoop(vid_filename)
     for i in range(latent_size):
-        for j in range(60):
+        N = 60
+        for j in range(N):
             val = 1.0 * j / N
             zp = val * end_z + (1 - val) * start_z
             img = decoder(zp)
