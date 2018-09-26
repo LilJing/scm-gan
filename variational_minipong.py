@@ -25,7 +25,7 @@ class BoxEnv():
         self.paddle_height = 4
         self.build_state()
 
-    # The agent can press four buttons: left, right, rotate-left, rotate-right
+    # The agent can press one of four buttons
     def step(self, a):
         # Some dimensions change in reaction to the agent's actions
         if a[0]:
@@ -331,6 +331,10 @@ ts = TimeSeries('Training', iters)
 
 vid = imutil.VideoMaker('causal_model.mp4')
 for i in range(iters):
+    encoder.train()
+    decoder.train()
+    transition.train()
+
     opt_encoder.zero_grad()
     opt_decoder.zero_grad()
     opt_transition.zero_grad()
@@ -370,6 +374,10 @@ for i in range(iters):
     opt_encoder.step()
     opt_decoder.step()
     opt_transition.step()
+
+    encoder.eval()
+    decoder.eval()
+    transition.eval()
 
     if i % 1000 == 0:
         filename = 'iter_{:06}_reconstruction.jpg'.format(i)
