@@ -13,11 +13,11 @@ from causal_graph import compute_causal_graph, render_causal_graph
 from skimage.measure import block_reduce
 
 latent_size = 6
-l1_power = 1.0
+l1_power = 10.0
 disc_power = .001
 num_actions = 6
 batch_size = 32
-iters = 300 * 1000
+iters = 500 * 1000
 
 env = None
 prev_states = None
@@ -299,6 +299,7 @@ def main():
         discriminator.train()
         transition.train()
 
+        """
         # First train the discriminator
         for j in range(3):
             opt_discriminator.zero_grad()
@@ -326,6 +327,7 @@ def main():
         disc_loss.backward()
         #clip_gradients(decoder, .01)
         opt_decoder.step()
+        """
 
         # Now train the autoencoder
         opt_encoder.zero_grad()
@@ -338,8 +340,8 @@ def main():
         z_prime = transition(z, actions)
         predicted = decoder(z_prime)
 
-        #pred_loss = F.binary_cross_entropy(predicted, target)
-        pred_loss = torch.mean((predicted - target) ** 2)
+        pred_loss = F.binary_cross_entropy(predicted, target)
+        #pred_loss = torch.mean((predicted - target) ** 2)
         ts.collect('Reconstruction loss', pred_loss)
 
         l1_scale = (l1_power * i) / iters

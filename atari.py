@@ -88,7 +88,7 @@ def convert_breakout(img_sequence):
 
 if __name__ == '__main__':
     batch_size = 8
-    env = MultiEnvironment('Breakout-v0', batch_size, frameskip=4)
+    env = MultiEnvironment('Pong-v0', batch_size, frameskip=4)
     num_actions = env.action_space.n
     for i in range(100):
         actions = np.random.randint(0, num_actions, batch_size)
