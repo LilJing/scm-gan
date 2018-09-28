@@ -310,7 +310,7 @@ def demo_latent_video(before, encoder, decoder, transition, latent_size, num_act
             zp = z.clone()
             zp[:, i] = val
             caption = "z{}={:.3f}".format(i, val)
-            vid.write_frame(decoder(zp), caption=caption)
+            vid.write_frame(decoder(zp), caption=caption, img_padding=10, resize_to=(256,256))
         vid.finish()
     print('Finished generating videos in {:03f}s'.format(time.time() - start_time))
 
@@ -354,8 +354,8 @@ for i in range(iters):
 
     # Estimate of the Kullback-Liebler divergence
     mean_loss = torch.sum(mu ** 2)
-    variance_loss = torch.sum(log_variance.exp() - log_variance - 1)
-    #variance_loss = torch.sum(log_variance.exp())
+    #variance_loss = torch.sum(log_variance.exp() - log_variance - 1)
+    variance_loss = torch.sum(log_variance.exp())
     ts.collect('mu loss', mean_loss)
     ts.collect('sigma loss', variance_loss)
     beta = .01
