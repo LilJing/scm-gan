@@ -11,6 +11,9 @@ import imutil
 
 # This function identifies the non-pruned connections
 def compute_causal_graph(model, latent_size, num_actions):
+    # TODO: fix for outer product
+    return np.eye(latent_size)
+
     input_size = latent_size + num_actions
     rows = []
     for i in range(input_size):

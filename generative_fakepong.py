@@ -249,19 +249,24 @@ class Transition(nn.Module):
         super().__init__()
         # Input: State + Action
         # Output: State
-        self.fc1 = nn.Linear(latent_size + num_actions, latent_size*2)
-        self.fc2 = nn.Linear(latent_size*2, latent_size, bias=False)
-        # one-layer version
-        #self.fc1 = nn.Linear(5, 4)
+        self.hidden_size = latent_size * 2
+        self.fc1 = nn.Linear(latent_size + num_actions, self.hidden_size)
+        self.fc2 = nn.Linear(self.hidden_size ** 2, latent_size, bias=False)
         self.cuda()
 
     def forward(self, z, actions):
+        batch_size = len(z)
         x = torch.cat([z, actions], dim=1)
 
         x = self.fc1(x)
         x = torch.sigmoid(x)
+
+        # Xiaoli idea: bilinear layer
+        # Multilinear Einstein summation to compute a differentiable OR between all inputs
+        x = torch.einsum('bi,bj->bij', (x, x)).view(batch_size, -1)
         x = self.fc2(x)
-        # Fern hack: Predict a delta/displacement
+
+        # Alan hack: Predict a delta/displacement
         return z + x
 
 
