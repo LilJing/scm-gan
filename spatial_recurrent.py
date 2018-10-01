@@ -140,37 +140,35 @@ class SimpleFCN(nn.Module):
         return x
 
 
-def to_tensor(img):
-    x = np.array([img])
-    x = np.moveaxis(x, -1, 1)
-    x = torch.Tensor(x)
-    return x.cuda()
-
-
-kitty = imutil.show('small_kitty.jpg', return_pixels=True, save=False)
-kitty /= 255.
-def get_example_pair():
-    canvas = np.ones((128, 128, 3))
-    target_canvas = np.ones((128, 128, 3))
-    #rx = random.randint(0,64)
-    #ry = random.randint(20,64)
-    rx = 40
-    ry = 20
-    canvas[ry:ry+64, rx:rx+54] = kitty
-    target_canvas[ry+64:, rx:rx+54] = (1,0,0)
-    target_canvas[ry:ry+64, :rx] = (0,1,0)
-    target_canvas[ry:ry+64, rx+54:] = (0,0,1)
-
-    return canvas, target_canvas
-
-
-def get_batch():
-    x, y = get_example_pair()
-    x, y = to_tensor(x), to_tensor(y)
-    return x, y
-
-
 if __name__ == '__main__':
+    def to_tensor(img):
+        x = np.array([img])
+        x = np.moveaxis(x, -1, 1)
+        x = torch.Tensor(x)
+        return x.cuda()
+
+    kitty = imutil.show('small_kitty.jpg', return_pixels=True, save=False)
+    kitty /= 255.
+    def get_example_pair():
+        canvas = np.ones((128, 128, 3))
+        target_canvas = np.ones((128, 128, 3))
+        #rx = random.randint(0,64)
+        #ry = random.randint(20,64)
+        rx = 40
+        ry = 20
+        canvas[ry:ry+64, rx:rx+54] = kitty
+        target_canvas[ry+64:, rx:rx+54] = (1,0,0)
+        target_canvas[ry:ry+64, :rx] = (0,1,0)
+        target_canvas[ry:ry+64, rx+54:] = (0,0,1)
+
+        return canvas, target_canvas
+
+
+    def get_batch():
+        x, y = get_example_pair()
+        x, y = to_tensor(x), to_tensor(y)
+        return x, y
+
     model = SimpleFCN()
     model.cuda()
     optimizer = torch.optim.Adam(model.parameters())
