@@ -2,18 +2,20 @@ import random
 import numpy as np
 import torch
 from torch import nn
-from torch import functional as F
+from torch.nn import functional as F
 import imutil
 
 
 # We don't want eg. Xavier initialization here
 # The RNN gradient should explode, not vanish
 def init_conv_weight(conv):
-    conv.weight.data.normal_(0, 2 ** 0.5)
+    #conv.weight.data.normal_(0, 1)
+    pass
 
 def init_gru_weight(gru):
-    gru.weight_hh_l0.data.normal_(0, 2 ** 0.5)
-    gru.weight_ih_l0.data.normal_(0, 2 ** 0.5)
+    #gru.weight_hh_l0.data.normal_(0, 1)
+    #gru.weight_ih_l0.data.normal_(0, 1)
+    pass
 
 
 class CSRN(nn.Module):
@@ -22,18 +24,20 @@ class CSRN(nn.Module):
         self.channels = channels
         self.rnn_in = channels
         self.rnn_out = self.rnn_in
-        self.conv_rows = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=5, stride=1, padding=2, bias=False)
-        self.conv_cols = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=5, stride=1, padding=2, bias=False)
+        self.conv_down = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=5, stride=1, padding=2, bias=False)
+        self.conv_up = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=5, stride=1, padding=2, bias=False)
+        self.conv_left = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=5, stride=1, padding=2, bias=False)
+        self.conv_right = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=5, stride=1, padding=2, bias=False)
         self.rnn_down = nn.GRU(self.rnn_in, self.rnn_out, bias=False)
         self.rnn_up = nn.GRU(self.rnn_in, self.rnn_out, bias=False)
         self.rnn_left = nn.GRU(self.rnn_in, self.rnn_out, bias=False)
         self.rnn_right = nn.GRU(self.rnn_in, self.rnn_out, bias=False)
         self.conv_combine = nn.Conv2d(self.rnn_in * 4, channels, kernel_size=1)
-        #self.conv_rows.weight.data += 1
-        #self.conv_rows.weight.data[:2] = 0
-        #self.conv_cols.weight.data[:2] = 0
-        init_conv_weight(self.conv_rows)
-        init_conv_weight(self.conv_cols)
+
+        init_conv_weight(self.conv_down)
+        init_conv_weight(self.conv_up)
+        init_conv_weight(self.conv_left)
+        init_conv_weight(self.conv_right)
         init_gru_weight(self.rnn_down)
         init_gru_weight(self.rnn_up)
         init_gru_weight(self.rnn_left)
@@ -62,7 +66,7 @@ class CSRN(nn.Module):
             conv_in = rnn_out.view(batch_size, width, self.rnn_out)
             conv_in = conv_in.permute(0, 2, 1)
             context_above[:, :, i, :] = conv_in
-            conv_out = self.conv_rows(conv_in)
+            conv_out = self.conv_down(conv_in)
             conv_out = torch.tanh(conv_out)
             rnn_state = conv_out.permute(0, 2, 1).contiguous()
             rnn_state = rnn_state.view(1, batch_size * width, self.rnn_in)
@@ -76,7 +80,7 @@ class CSRN(nn.Module):
             conv_in = rnn_out.view(batch_size, width, self.rnn_out)
             conv_in = conv_in.permute(0, 2, 1)
             context_below[:, :, i, :] = conv_in
-            conv_out = self.conv_rows(conv_in)
+            conv_out = self.conv_up(conv_in)
             conv_out = torch.tanh(conv_out)
             rnn_state = conv_out.permute(0, 2, 1).contiguous()
             rnn_state = rnn_state.view(1, batch_size * width, self.rnn_out)
@@ -90,7 +94,7 @@ class CSRN(nn.Module):
             conv_in = rnn_out.view(batch_size, height, self.rnn_out)
             conv_in = conv_in.permute(0, 2, 1)
             context_left[:, :, :, i] = conv_in
-            conv_out = self.conv_cols(conv_in)
+            conv_out = self.conv_left(conv_in)
             conv_out = torch.tanh(conv_out)
             rnn_state = conv_out.permute(0, 2, 1).contiguous()
             rnn_state = rnn_state.view(1, batch_size * height, self.rnn_out)
@@ -104,7 +108,7 @@ class CSRN(nn.Module):
             conv_in = rnn_out.view(batch_size, height, self.rnn_out)
             conv_in = conv_in.permute(0, 2, 1)
             context_left[:, :, :, i] = conv_in
-            conv_out = self.conv_cols(conv_in)
+            conv_out = self.conv_right(conv_in)
             conv_out = torch.tanh(conv_out)
             rnn_state = conv_out.permute(0, 2, 1).contiguous()
             rnn_state = rnn_state.view(1, batch_size * height, self.rnn_out)
@@ -117,24 +121,23 @@ class CSRN(nn.Module):
 
 class SimpleFCN(nn.Module):
     def __init__(self):
-        super().__init(self)
-        self.conv1 = torch.Conv2d(3, 64, kernel_size=(3,3), padding=1)
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=(3,3), padding=1)
         self.bn1 = nn.BatchNorm2d(64)
         self.csrn1 = CSRN(64)
         self.bn2 = nn.BatchNorm2d(64)
-        self.conv2 = torch.Conv2d(64, 3, kernel_size=(3,3), padding=1)
+        self.conv2 = nn.Conv2d(64, 3, kernel_size=(3,3), padding=1)
 
     def forward(self, x):
         x = self.conv1(x)
-        x = torch.leaky_relu(x, 0.2)
+        x = F.leaky_relu(x, 0.2)
         x = self.bn1(x)
         x = self.csrn1(x)
         x = self.bn2(x)
-        x = torch.leaky_relu(x, 0.2)
+        x = F.leaky_relu(x, 0.2)
         x = self.conv2(x)
         x = torch.sigmoid(x)
         return x
-
 
 
 def to_tensor(img):
@@ -149,8 +152,10 @@ kitty /= 255.
 def get_example_pair():
     canvas = np.ones((128, 128, 3))
     target_canvas = np.ones((128, 128, 3))
-    rx = random.randint(0,64)
-    ry = random.randint(20,64)
+    #rx = random.randint(0,64)
+    #ry = random.randint(20,64)
+    rx = 40
+    ry = 20
     canvas[ry:ry+64, rx:rx+54] = kitty
     target_canvas[ry+64:, rx:rx+54] = (1,0,0)
     target_canvas[ry:ry+64, :rx] = (0,1,0)
@@ -166,7 +171,7 @@ def get_batch():
 
 
 if __name__ == '__main__':
-    model = CSRN(channels=3)
+    model = SimpleFCN()
     model.cuda()
     optimizer = torch.optim.Adam(model.parameters())
     for i in range(1000):
@@ -177,8 +182,7 @@ if __name__ == '__main__':
         mse_loss.backward()
         print('Loss: {}'.format(mse_loss))
         optimizer.step()
-        if i % 10 == 0:
-            imutil.show(x[0], save=False)
-            imutil.show(y[0], save=False)
-            imutil.show(output[0], save=False)
+        #imutil.show(x[0], save=False)
+        #imutil.show(y[0], save=False)
+        imutil.show(output[0], video_filename='kitty.mjpeg')
 
