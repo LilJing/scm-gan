@@ -13,11 +13,11 @@ from causal_graph import compute_causal_graph, render_causal_graph
 from skimage.measure import block_reduce
 
 latent_size = 4
-l1_power = 10.0
+l1_power = 100.0
 disc_power = .001
 num_actions = 4
 batch_size = 32
-iters = 100 * 1000
+iters = 900 * 1000
 
 env = None
 prev_states = None
@@ -260,15 +260,7 @@ class Transition(nn.Module):
 
 def demo_latent_video(before, encoder, decoder, transition, latent_size, num_actions, epoch=0):
     start_time = time.time()
-    batch_size = before.shape[0]
-    actions = torch.zeros(batch_size, num_actions).cuda()
-    for i in range(batch_size):
-        a = np.random.randint(0, num_actions)
-        actions[i, a] = 1
-
-    prev_z = encoder(before)
-    #z = transition(prev_z, actions)
-    z = prev_z
+    z = encoder(before)
     for i in range(latent_size):
         vid_filename = 'iter_{:06d}_dim_{:02d}'.format(epoch, i)
         vid = imutil.VideoLoop(vid_filename)

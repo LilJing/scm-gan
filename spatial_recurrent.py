@@ -24,10 +24,10 @@ class CSRN(nn.Module):
         self.channels = channels
         self.rnn_in = channels
         self.rnn_out = self.rnn_in
-        self.conv_down = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=5, stride=1, padding=2, bias=False)
-        self.conv_up = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=5, stride=1, padding=2, bias=False)
-        self.conv_left = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=5, stride=1, padding=2, bias=False)
-        self.conv_right = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=5, stride=1, padding=2, bias=False)
+        self.conv_down = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=3, stride=1, padding=1)
+        self.conv_up = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=3, stride=1, padding=1)
+        self.conv_left = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=3, stride=1, padding=1)
+        self.conv_right = nn.Conv1d(self.rnn_out, self.rnn_in, kernel_size=3, stride=1, padding=1)
         self.rnn_down = nn.GRU(self.rnn_in, self.rnn_out, bias=False)
         self.rnn_up = nn.GRU(self.rnn_in, self.rnn_out, bias=False)
         self.rnn_left = nn.GRU(self.rnn_in, self.rnn_out, bias=False)
@@ -184,5 +184,5 @@ if __name__ == '__main__':
         optimizer.step()
         #imutil.show(x[0], save=False)
         #imutil.show(y[0], save=False)
-        imutil.show(output[0], video_filename='kitty.mjpeg')
+        imutil.show(output[0], video_filename='kitty.mjpeg', caption='K3 w/bias step {}'.format(i), font_size=12)
 
