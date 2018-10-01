@@ -12,12 +12,14 @@ from atari import MultiEnvironment
 from causal_graph import compute_causal_graph, render_causal_graph
 from skimage.measure import block_reduce
 
+from spatial_recurrent import CSRN
+
 latent_size = 4
-l1_power = 100.0
+l1_power = 10.0
 disc_power = .001
 num_actions = 4
 batch_size = 32
-iters = 900 * 1000
+iters = 100 * 1000
 
 env = None
 prev_states = None
@@ -111,6 +113,7 @@ class Encoder(nn.Module):
         # 64x20x20
         self.conv3 = nn.Conv2d(64, 64, 4, stride=2, padding=1)
         self.bn3 = nn.BatchNorm2d(64)
+        self.csrn1 = CSRN(64)
         # 64x10x10
         self.conv4 = nn.Conv2d(64, 64, 4, stride=2, padding=1)
         self.bn4 = nn.BatchNorm2d(64)
@@ -138,6 +141,8 @@ class Encoder(nn.Module):
         x = self.conv3(x)
         x = self.bn3(x)
         x = F.leaky_relu(x, 0.2)
+
+        x = self.csrn1(x)
 
         x = self.conv4(x)
         x = self.bn4(x)
@@ -199,6 +204,7 @@ class Decoder(nn.Module):
         # 64 x 10 x 10
         self.deconv3 = nn.ConvTranspose2d(64, 64, 4, stride=2, padding=1)
         self.bn3 = nn.BatchNorm2d(64)
+        self.csrn1 = CSRN(64)
         # 64 x 20 x 20
         self.deconv4 = nn.ConvTranspose2d(64, 64, 4, stride=2, padding=1)
         self.bn4 = nn.BatchNorm2d(64)
@@ -227,6 +233,8 @@ class Decoder(nn.Module):
         x = F.leaky_relu(x, 0.2)
         x = self.bn3(x)
 
+        x = self.csrn1(x)
+
         x = self.deconv4(x)
         x = F.leaky_relu(x, 0.2)
         x = self.bn4(x)
@@ -251,7 +259,7 @@ class Transition(nn.Module):
         x = torch.cat([z, actions], dim=1)
 
         x = self.fc1(x)
-        x = F.sigmoid(x)
+        x = torch.sigmoid(x)
         x = self.fc2(x)
         # Fern hack: Predict a delta/displacement
         return z + x
