@@ -150,7 +150,8 @@ def main():
 
         if train_iter % 1000 == 0:
             filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
-            imutil.show(torch.cat([x[:4], reconstructed[:4]], dim=0), caption='Reconstruction iter {}'.format(train_iter), filename=filename, font_size=12)
+            img = torch.cat((x[:4], reconstructed[:4]), dim=3)
+            imutil.show(img, filename=filename, caption='D(E(x)) iter {}'.format(train_iter), font_size=10)
             # Compute metric again after training
             trained_score = higgins_metric(dsprites.simulator, true_latent_dim, encoder, latent_dim)
 
