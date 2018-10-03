@@ -10,7 +10,7 @@ class LinearClassifier(nn.Module):
 
     def forward(self, x):
         x = self.fc1(x)
-        x = torch.softmax(x, dim=1)
+        x = torch.log_softmax(x, dim=1)
         return x
 
 
@@ -53,7 +53,7 @@ def higgins_metric(simulator, true_latent_dim, encoder, encoded_latent_dim,
         output = linear_model(z_diff)
         y_pred = output.max(1, keepdim=True)[1]
         num_correct = y_pred.eq(target.view_as(y_pred)).sum().item()
-        loss = -nn.functional.nll_loss(output, target)
+        loss = nn.functional.nll_loss(output, target)
         loss.backward()
         optimizer.step()
 
