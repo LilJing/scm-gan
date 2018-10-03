@@ -19,7 +19,7 @@ l1_power = 10.0
 disc_power = .001
 num_actions = 4
 batch_size = 32
-iters = 100 * 1000
+iters = 500 * 1000
 
 env = None
 prev_states = None
@@ -64,8 +64,8 @@ class BoxEnv():
                    self.left_x - self.paddle_width: self.left_x + self.paddle_width] = 1.0
         self.state[self.right_y - self.paddle_height:self.right_y + self.paddle_height,
                    self.right_x - self.paddle_width: self.right_x + self.paddle_width] = 1.0
-        self.state[self.ball_y-1:self.ball_y+1,
-                   self.ball_x-1:self.ball_x+1] = 1.0
+        self.state[self.ball_y-2:self.ball_y+2,
+                   self.ball_x-2:self.ball_x+2] = 1.0
 
 
 def build_dataset(num_actions, size=50000):
@@ -352,7 +352,6 @@ def main():
         discriminator.train()
         transition.train()
 
-        """
         # First train the discriminator
         for j in range(3):
             opt_discriminator.zero_grad()
@@ -369,7 +368,7 @@ def main():
         ts.collect('Disc fake loss', disc_fake)
         ts.collect('Discriminator loss', disc_loss)
         ts.collect('Generated pixel variance', pixel_variance)
-        clip_weights(discriminator, .01)
+        #clip_weights(discriminator, .01)
 
         # Apply discriminator loss for realism
         opt_decoder.zero_grad()
@@ -380,7 +379,6 @@ def main():
         disc_loss.backward()
         #clip_gradients(decoder, .01)
         opt_decoder.step()
-        """
 
         # Now train the autoencoder
         opt_encoder.zero_grad()
