@@ -5,6 +5,7 @@ import numpy as np
 
 DATA_PATH = '/mnt/nfs/data/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz'
 NUM_FACTORS = 4
+IMG_WIDTH = 64
 imgs = None
 
 def init():
@@ -37,8 +38,7 @@ def generate_image_discrete(factors):
     idx += factors[1] * 32*32
     idx += factors[0] * 32*32*40
     idx += shape * 32*32*40*6
-    # Hack: subsample down to 32x32 for the architecture
-    return imgs[idx, ::2, ::2]
+    return imgs[idx]
 
 
 def generate_image_continuous(factors):
@@ -71,7 +71,7 @@ def normalize_factors(factors):
 
 
 def get_batch(batch_size=32):
-    x = np.zeros((batch_size, 1, 32, 32))
+    x = np.zeros((batch_size, 1, IMG_WIDTH, IMG_WIDTH))
     target = np.zeros((batch_size, NUM_FACTORS))
     for i in range(batch_size):
         x[i], target[i] = get_example()

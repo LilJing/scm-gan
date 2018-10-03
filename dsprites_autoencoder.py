@@ -29,8 +29,8 @@ class Encoder(nn.Module):
         self.conv4 = nn.Conv2d(64, 64, 4, stride=2, padding=1)
         self.bn4 = nn.BatchNorm2d(64)
         # Bx64x4x4
-        #self.conv5 = nn.Conv2d(64, 64, 4, stride=2, padding=1)
-        #self.bn5 = nn.BatchNorm2d(64)
+        self.conv5 = nn.Conv2d(64, 64, 4, stride=2, padding=1)
+        self.bn5 = nn.BatchNorm2d(64)
         # Bx64x2x2
         self.fc1 = nn.Linear(64*2*2, 256)
         self.bn_fc1 = nn.BatchNorm1d(256)
@@ -57,9 +57,9 @@ class Encoder(nn.Module):
         x = self.bn4(x)
         x = F.leaky_relu(x, 0.2)
 
-        #x = self.conv5(x)
-        #x = self.bn5(x)
-        #x = F.leaky_relu(x, 0.2)
+        x = self.conv5(x)
+        x = self.bn5(x)
+        x = F.leaky_relu(x, 0.2)
 
         x = x.view(-1, 64*2*2)
         x = self.fc1(x)
@@ -88,8 +88,8 @@ class Decoder(nn.Module):
         self.deconv4 = nn.ConvTranspose2d(64, 64, 4, stride=2, padding=1)
         self.bn4 = nn.BatchNorm2d(64)
         # B x 64 x 32 x 32
-        self.deconv5 = nn.ConvTranspose2d(64, 1, 3, stride=1, padding=1)
-        # B x 1 x 32 x 32
+        self.deconv5 = nn.ConvTranspose2d(64, 1, 4, stride=2, padding=1)
+        # B x 1 x 64 x 64
         self.cuda()
 
     def forward(self, z):
