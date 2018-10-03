@@ -3,6 +3,7 @@ import random
 import imutil
 import numpy as np
 
+DATA_PATH = '/mnt/nfs/data/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz'
 NUM_FACTORS = 4
 imgs = None
 
@@ -11,7 +12,7 @@ def init():
     global imgs
     start_time = time.time()
     print('Loading dsprites...')
-    with np.load('dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', encoding='bytes') as npz:
+    with np.load(DATA_PATH, encoding='bytes') as npz:
         #metadata = npz['metadata']
         imgs = npz['imgs']
         latents_classes = npz['latents_classes']
