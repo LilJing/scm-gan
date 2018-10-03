@@ -70,7 +70,7 @@ def normalize_factors(factors):
 
 
 def get_batch(batch_size=32):
-    x = np.zeros((batch_size, 3, 32, 32))
+    x = np.zeros((batch_size, 1, 32, 32))
     target = np.zeros((batch_size, NUM_FACTORS))
     for i in range(batch_size):
         x[i], target[i] = get_example()
