@@ -66,7 +66,7 @@ class Decoder(nn.Module):
         x = self.bn3(x)
         x = F.leaky_relu(x, 0.2)
         x = self.fc4(x)
-        x = torch.sigmoid(x)
+        #x = torch.sigmoid(x)
         x = x.view(-1, 1, 64, 64)
         return x
 
@@ -91,7 +91,7 @@ def main():
     # Train the autoencoder
     opt_enc = torch.optim.Adagrad(encoder.parameters(), lr=.01)
     opt_dec = torch.optim.Adagrad(decoder.parameters(), lr=.01)
-    train_iters = 400 * 1000
+    train_iters = 25 * 1000
     ts = TimeSeries('Training Autoencoder', train_iters)
     for train_iter in range(train_iters + 1):
         encoder.train()
@@ -103,15 +103,17 @@ def main():
         opt_dec.zero_grad()
         x = torch.Tensor(images).cuda()
         mu, log_variance = encoder(x)
-        reconstructed = decoder(reparameterize(mu, log_variance))
+        reconstructed_logits = decoder(reparameterize(mu, log_variance))
+        reconstructed = torch.sigmoid(reconstructed)
 
-        mse_loss = torch.mean((x - reconstructed) ** 2)
-        ts.collect('MSE loss', mse_loss)
+        #mse_loss = torch.mean((x - reconstructed) ** 2)
+        recon_loss = F.binary_cross_entropy_with_logits(reconstructed_logits, x)
+        ts.collect('Reconstruction loss', recon_loss)
 
         kld_loss = -0.5 * torch.mean(1 + log_variance - mu.pow(2) - log_variance.exp())
         ts.collect('KLD loss', kld_loss)
 
-        loss = mse_loss + kld_loss
+        loss = recon_loss + kld_loss
         loss.backward()
         opt_enc.step()
         opt_dec.step()

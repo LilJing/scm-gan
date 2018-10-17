@@ -1,5 +1,3 @@
-# A variational autoencoder with some structural causal model stuff
-# Uses a fake environment that looks sort of like Pong
 import time
 import os
 import json
@@ -9,78 +7,13 @@ import random
 from tqdm import tqdm
 import imutil
 from logutil import TimeSeries
+import minipong
 
-
-class BoxEnv():
-    def __init__(self):
-        # The "true" latent space is two values which vary
-        self.left_y = np.random.randint(10, 22)
-        self.right_y = np.random.randint(10, 22)
-        self.ball_x = np.random.randint(2, 30)
-        self.ball_y = np.random.randint(2, 30)
-
-        self.left_x = 4
-        self.right_x = 28
-        self.paddle_width = 1
-        self.paddle_height = 4
-        self.build_state()
-
-    # The agent can press four buttons: left, right, rotate-left, rotate-right
-    def step(self, a):
-        # Some dimensions change in reaction to the agent's actions
-        if a[0]:
-            self.right_y -= 3
-        elif a[1]:
-            self.right_y += 3
-
-        if a[2]:
-            self.left_y -= 3
-        elif a[3]:
-            self.left_y += 3
-
-        # Other dimensions change, but not based on agent actions
-        self.ball_x += 1
-        self.ball_y += 1
-
-        self.build_state()
-
-    def build_state(self):
-        self.state = np.zeros((32,32))
-        self.state[self.left_y - self.paddle_height:self.left_y + self.paddle_height,
-                   self.left_x - self.paddle_width: self.left_x + self.paddle_width] = 1.0
-        self.state[self.right_y - self.paddle_height:self.right_y + self.paddle_height,
-                   self.right_x - self.paddle_width: self.right_x + self.paddle_width] = 1.0
-        self.state[self.ball_y-1:self.ball_y+1,
-                   self.ball_x-1:self.ball_x+1] = 1.0
-
-
-def build_dataset(num_actions, size=100 * 1000):
-    dataset = []
-    for i in tqdm(range(size)):
-        env = BoxEnv()
-        before = np.array(env.state)
-        action = np.zeros(shape=(num_actions,))
-        action[np.random.randint(num_actions)] = 1.
-        env.step(action)
-        after = np.array(env.state)
-        dataset.append((before, action, after))
-    return dataset  # list of tuples
-
-
-def get_batch(dataset, size=32):
-    idx = np.random.randint(len(dataset) - size)
-    inputs, actions, targets = zip(*dataset[idx:idx + size])
-    input_tensor = torch.Tensor(inputs).cuda()
-    action_tensor = torch.Tensor(actions).cuda()
-    target_tensor = torch.Tensor(targets).cuda()
-    return input_tensor, action_tensor, target_tensor
-
-
-# ok now we build a neural network
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+
 
 class Encoder(nn.Module):
     def __init__(self, latent_size):
@@ -369,7 +302,7 @@ def clip_gradients(network, val):
 latent_size = 4
 num_actions = 4
 batch_size = 32
-data = build_dataset(num_actions)
+data = minipong.build_dataset(num_actions)
 encoder = Encoder(latent_size)
 decoder = Decoder(latent_size)
 discriminator = Discriminator()
@@ -388,7 +321,7 @@ for i in range(iters):
     # First train the discriminator
     for j in range(3):
         opt_discriminator.zero_grad()
-        _, _, real = get_batch(data, batch_size)
+        _, _, real = minipong.get_batch(data, batch_size)
         random_z = torch.zeros(batch_size, latent_size).normal_(1, 1).cuda()
         fake = decoder(random_z)[:,0]
         disc_real = torch.relu(1 + discriminator(real)).sum()
@@ -419,7 +352,7 @@ for i in range(iters):
     opt_decoder.zero_grad()
     opt_transition.zero_grad()
 
-    before, actions, target = get_batch(data, batch_size)
+    before, actions, target = minipong.get_batch(data, batch_size)
 
     # Just try to autoencode
     z = encoder(before)

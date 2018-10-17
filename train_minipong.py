@@ -7,94 +7,25 @@ import random
 from tqdm import tqdm
 import imutil
 from logutil import TimeSeries
-
 from causal_graph import compute_causal_graph, render_causal_graph
+import minipong
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+
 
 latent_size = 4
 l1_power = 10.0
 disc_power = .001
 num_actions = 4
 batch_size = 32
-iters = 500 * 1000
-
-env = None
-prev_states = None
+iters = 25 * 1000
 
 
-class BoxEnv():
-    def __init__(self):
-        # The "true" latent space is two values which vary
-        self.left_y = np.random.randint(10, 30)
-        self.right_y = np.random.randint(10, 30)
-        self.ball_x = np.random.randint(2, 38)
-        self.ball_y = np.random.randint(2, 38)
+dataset = minipong.build_dataset(num_actions)
 
-        self.left_x = 4
-        self.right_x = 36
-        self.paddle_width = 1
-        self.paddle_height = 4
-        self.build_state()
-
-    # The agent can press one of four buttons
-    def step(self, a):
-        # Some dimensions change in reaction to the agent's actions
-        if a[0]:
-            self.right_y -= 3
-        elif a[1]:
-            self.right_y += 3
-
-        if a[2]:
-            self.left_y -= 3
-        elif a[3]:
-            self.left_y += 3
-
-        # Other dimensions change, but not based on agent actions
-        self.ball_x += 1
-        #self.ball_y += 1
-
-        self.build_state()
-
-    def build_state(self):
-        self.state = np.zeros((40,40,3))
-        self.state[self.left_y - self.paddle_height:self.left_y + self.paddle_height,
-                   self.left_x - self.paddle_width: self.left_x + self.paddle_width] = 1.0
-        self.state[self.right_y - self.paddle_height:self.right_y + self.paddle_height,
-                   self.right_x - self.paddle_width: self.right_x + self.paddle_width] = 1.0
-        self.state[self.ball_y-2:self.ball_y+2,
-                   self.ball_x-2:self.ball_x+2] = 1.0
-
-
-def build_dataset(num_actions, size=50000):
-    dataset = []
-    for i in tqdm(range(size)):
-        env = BoxEnv()
-        before = np.moveaxis(env.state, -1, 0)
-        action = np.zeros(shape=(num_actions,))
-        action[np.random.randint(num_actions)] = 1.
-        env.step(action)
-        after = np.moveaxis(env.state, -1, 0)
-        dataset.append((before, action, after))
-    return dataset  # list of tuples
-
-
-dataset = build_dataset(num_actions)
-
-
-def get_batch(size=32):
-    idx = np.random.randint(len(dataset) - size)
-    inputs, actions, targets = zip(*dataset[idx:idx + size])
-    input_tensor = torch.Tensor(inputs).cuda()
-    action_tensor = torch.Tensor(actions).cuda()
-    target_tensor = torch.Tensor(targets).cuda()
-    return input_tensor, action_tensor, target_tensor
-
-
-
-# ok now we build a neural network
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
 
 class Encoder(nn.Module):
     def __init__(self, latent_size):
@@ -345,7 +276,7 @@ def main():
         # First train the discriminator
         for j in range(3):
             opt_discriminator.zero_grad()
-            _, _, real = get_batch()
+            _, _, real = minipong.get_batch(dataset)
             fake = decoder(encoder(real))
             disc_real = torch.relu(1 + discriminator(real)).sum()
             disc_fake = torch.relu(1 - discriminator(fake)).sum()
@@ -362,7 +293,7 @@ def main():
 
         # Apply discriminator loss for realism
         opt_decoder.zero_grad()
-        _, _, real = get_batch()
+        _, _, real = minipong.get_batch(dataset)
         fake = decoder(encoder(real))
         disc_loss = disc_power * torch.relu(1 + discriminator(fake)).sum()
         ts.collect('Gen. Disc loss', disc_loss)
@@ -375,7 +306,7 @@ def main():
         opt_decoder.zero_grad()
         opt_transition.zero_grad()
 
-        before, actions, target = get_batch()
+        before, actions, target = get_batch(dataset)
 
         z = encoder(before)
         z_prime = transition(z, actions)
