@@ -38,7 +38,7 @@ def generate_image_discrete(factors):
     idx += factors[1] * 32*32
     idx += factors[0] * 32*32*40
     idx += shape * 32*32*40*6
-    return imgs[idx]
+    return (imgs[idx] - .5) * 2.
 
 
 def generate_image_continuous(factors):
