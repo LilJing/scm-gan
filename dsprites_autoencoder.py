@@ -66,7 +66,7 @@ class Decoder(nn.Module):
         x = self.bn3(x)
         x = F.leaky_relu(x, 0.2)
         x = self.fc4(x)
-        x = torch.tanh(x)
+        x = torch.sigmoid(x)
         x = x.view(-1, 1, 64, 64)
         return x
 
