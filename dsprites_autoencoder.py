@@ -17,11 +17,11 @@ class Encoder(nn.Module):
         super().__init__()
         self.latent_size = latent_size
         # Bx1x64x64
-        self.fc1 = nn.Linear(64*64, 1024)
-        self.bn1 = nn.BatchNorm1d(1024)
-        self.fc2 = nn.Linear(1024, 1024)
-        self.bn2 = nn.BatchNorm1d(1024)
-        self.fc3 = nn.Linear(1024, latent_size * 2)
+        self.fc1 = nn.Linear(64*64, 1200)
+        self.bn1 = nn.BatchNorm1d(1200)
+        self.fc2 = nn.Linear(1200, 1200)
+        self.bn2 = nn.BatchNorm1d(1200)
+        self.fc3 = nn.Linear(1200, latent_size * 2)
 
         # Bxlatent_size
         self.cuda()
@@ -45,9 +45,10 @@ class Decoder(nn.Module):
     def __init__(self, latent_size):
         super().__init__()
         self.latent_size = latent_size
-        self.fc1 = nn.Linear(latent_size, 1024)
-        self.fc2 = nn.Linear(1024, 1024)
-        self.fc3 = nn.Linear(1024, 4096)
+        self.fc1 = nn.Linear(latent_size, 1200)
+        self.fc2 = nn.Linear(1200, 1200)
+        self.fc3 = nn.Linear(1200, 1200)
+        self.fc4 = nn.Linear(1200, 4096)
         # B x 1 x 64 x 64
         self.cuda()
 
@@ -57,6 +58,8 @@ class Decoder(nn.Module):
         x = self.fc2(x)
         x = F.leaky_relu(x, 0.2)
         x = self.fc3(x)
+        x = F.leaky_relu(x, 0.2)
+        x = self.fc4(x)
         x = torch.sigmoid(x)
         x = x.view(-1, 1, 64, 64)
         return x
@@ -82,7 +85,7 @@ def main():
     # Train the autoencoder
     opt_enc = torch.optim.Adam(encoder.parameters())
     opt_dec = torch.optim.Adam(decoder.parameters())
-    train_iters = 20 * 1000
+    train_iters = 25 * 1000
     ts = TimeSeries('Training Autoencoder', train_iters)
     for train_iter in range(train_iters + 1):
         random_factors = np.random.uniform(size=(batch_size, true_latent_dim))
