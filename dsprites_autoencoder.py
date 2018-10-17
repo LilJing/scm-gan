@@ -91,22 +91,34 @@ def main():
     # Train the autoencoder
     opt_enc = torch.optim.Adagrad(encoder.parameters(), lr=.01)
     opt_dec = torch.optim.Adagrad(decoder.parameters(), lr=.01)
-    train_iters = 100 * 1000
+    train_iters = 400 * 1000
     ts = TimeSeries('Training Autoencoder', train_iters)
     for train_iter in range(train_iters + 1):
+        encoder.train()
+        decoder.train()
+
         random_factors = np.random.uniform(size=(batch_size, true_latent_dim))
         images, factors = dsprites.get_batch()
         opt_enc.zero_grad()
         opt_dec.zero_grad()
         x = torch.Tensor(images).cuda()
-        mu, log_sigma = encoder(x)
-        reconstructed = decoder(reparameterize(mu, log_sigma))
-        loss = torch.sum((x - reconstructed) ** 2)
+        mu, log_variance = encoder(x)
+        reconstructed = decoder(reparameterize(mu, log_variance))
+
+        mse_loss = torch.mean((x - reconstructed) ** 2)
+        ts.collect('MSE loss', mse_loss)
+
+        kld_loss = -0.5 * torch.mean(1 + log_variance - mu.pow(2) - log_variance.exp())
+        ts.collect('KLD loss', kld_loss)
+
+        loss = mse_loss + kld_loss
         loss.backward()
-        ts.collect('MSE loss', loss)
         opt_enc.step()
         opt_dec.step()
         ts.print_every(2)
+
+        encoder.eval()
+        decoder.eval()
 
         if train_iter % 1000 == 0:
             filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
