@@ -91,7 +91,7 @@ def main():
     # Train the autoencoder
     opt_enc = torch.optim.Adagrad(encoder.parameters(), lr=.01)
     opt_dec = torch.optim.Adagrad(decoder.parameters(), lr=.01)
-    train_iters = 100 * 1000
+    train_iters = 200 * 1000
     ts = TimeSeries('Training Autoencoder', train_iters)
     for train_iter in range(train_iters + 1):
         encoder.train()
@@ -113,7 +113,7 @@ def main():
         kld_loss = -0.5 * torch.mean(1 + log_variance - mu.pow(2) - log_variance.exp())
         ts.collect('KLD loss', kld_loss)
 
-        beta = 1.0
+        beta = 4.0
         loss = recon_loss + beta * kld_loss
         loss.backward()
         opt_enc.step()
