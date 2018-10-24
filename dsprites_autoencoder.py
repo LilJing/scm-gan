@@ -91,7 +91,7 @@ def main():
     # Train the autoencoder
     opt_enc = torch.optim.Adagrad(encoder.parameters(), lr=.01)
     opt_dec = torch.optim.Adagrad(decoder.parameters(), lr=.01)
-    train_iters = 25 * 1000
+    train_iters = 100 * 1000
     ts = TimeSeries('Training Autoencoder', train_iters)
     for train_iter in range(train_iters + 1):
         encoder.train()
@@ -104,10 +104,10 @@ def main():
         x = torch.Tensor(images).cuda()
         mu, log_variance = encoder(x)
         reconstructed_logits = decoder(reparameterize(mu, log_variance))
-        reconstructed = torch.sigmoid(reconstructed)
+        reconstructed = torch.sigmoid(reconstructed_logits)
 
-        #mse_loss = torch.mean((x - reconstructed) ** 2)
-        recon_loss = F.binary_cross_entropy_with_logits(reconstructed_logits, x)
+        #recon_loss = torch.sum((x - reconstructed) ** 2)
+        recon_loss = F.binary_cross_entropy_with_logits(reconstructed_logits, x, reduction='sum')
         ts.collect('Reconstruction loss', recon_loss)
 
         kld_loss = -0.5 * torch.mean(1 + log_variance - mu.pow(2) - log_variance.exp())
@@ -126,12 +126,14 @@ def main():
             filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
             img = torch.cat((x[:4], reconstructed[:4]), dim=3)
             imutil.show(img, filename=filename, caption='D(E(x)) iter {}'.format(train_iter), font_size=10)
+            print('Mu/log_var:')
+            print(mu[0])
+            print(log_variance[0])
+        if train_iter % 10000 == 0:
             # Compute metric again after training
-
             trained_score = higgins_metric(dsprites.simulator, true_latent_dim, encoder, latent_dim)
             print('Higgins metric before training: {}'.format(random_score))
-            print('Higgins metric after training {} iters: {}'.format(
-                train_iter, trained_score))
+            print('Higgins metric after training {} iters: {}'.format(train_iter, trained_score))
             ts.collect('Higgins Metric', trained_score)
     print(ts)
     print('Finished')
