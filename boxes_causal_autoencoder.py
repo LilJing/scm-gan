@@ -36,11 +36,11 @@ class Encoder(nn.Module):
         super().__init__()
         self.latent_size = latent_size
         # Bx1x64x64
-        self.fc1 = nn.Linear(64*64, 1200)
-        self.bn1 = nn.BatchNorm1d(1200)
-        self.fc2 = nn.Linear(1200, 1200)
-        self.bn2 = nn.BatchNorm1d(1200)
-        self.fc3 = nn.Linear(1200, latent_size * 2)
+        self.fc1 = nn.Linear(64*64, 120)
+        self.bn1 = nn.BatchNorm1d(120)
+        self.fc2 = nn.Linear(120, 120)
+        self.bn2 = nn.BatchNorm1d(120)
+        self.fc3 = nn.Linear(120, latent_size)
 
         # Bxlatent_size
         self.cuda()
@@ -57,20 +57,20 @@ class Encoder(nn.Module):
         x = F.relu(x)
 
         x = self.fc3(x)
-        return x[:,:self.latent_size], x[:, self.latent_size:]
+        return x, None
 
 
 class Decoder(nn.Module):
     def __init__(self, latent_size):
         super().__init__()
         self.latent_size = latent_size
-        self.fc1 = nn.Linear(latent_size, 1200)
-        self.bn1 = nn.BatchNorm1d(1200)
-        self.fc2 = nn.Linear(1200, 1200)
-        self.bn2 = nn.BatchNorm1d(1200)
-        self.fc3 = nn.Linear(1200, 1200)
-        self.bn3 = nn.BatchNorm1d(1200)
-        self.fc4 = nn.Linear(1200, 4096)
+        self.fc1 = nn.Linear(latent_size, 120)
+        self.bn1 = nn.BatchNorm1d(120)
+        self.fc2 = nn.Linear(120, 120)
+        self.bn2 = nn.BatchNorm1d(120)
+        self.fc3 = nn.Linear(120, 120)
+        self.bn3 = nn.BatchNorm1d(120)
+        self.fc4 = nn.Linear(120, 4096)
         # B x 1 x 64 x 64
         self.cuda()
 
@@ -107,7 +107,7 @@ def main():
     opt_enc = torch.optim.Adagrad(encoder.parameters(), lr=.01)
     opt_dec = torch.optim.Adagrad(decoder.parameters(), lr=.01)
     opt_trans = torch.optim.Adagrad(transition.parameters(), lr=.01)
-    train_iters = 200 * 1000
+    train_iters = 50 * 1000
     ts = TimeSeries('Training Autoencoder', train_iters)
     for train_iter in range(train_iters + 1):
         encoder.train()
@@ -124,21 +124,23 @@ def main():
         reconstructed = torch.sigmoid(reconstructed_logits)
 
         #recon_loss = torch.sum((x - reconstructed) ** 2)
-        recon_loss = F.binary_cross_entropy_with_logits(reconstructed_logits, x, reduction='sum')
-        ts.collect('Reconstruction loss', recon_loss)
+        #recon_loss = F.binary_cross_entropy_with_logits(reconstructed_logits, x, reduction='sum')
+        #ts.collect('Reconstruction loss', recon_loss)
 
         z_tplusone = transition(z, a_t)
         predicted_logits = decoder(z_tplusone)
         prediction_loss = F.binary_cross_entropy_with_logits(predicted_logits, x_tplusone, reduction='sum')
         ts.collect('Prediction loss', prediction_loss)
 
-        l1_scale = 10.0 * (train_iter / train_iters)
-        l1_loss = 0.
-        l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
-        l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
+        l1_scale = 10.
+        #l1_loss = 0.
+        #l1_loss += l1_scale * F.l1_loss(transition.fc1.weight, torch.zeros(transition.fc1.weight.shape).cuda())
+        #l1_loss += l1_scale * F.l1_loss(transition.fc2.weight, torch.zeros(transition.fc2.weight.shape).cuda())
+        z_diff = z_tplusone - z
+        l1_loss = l1_scale * F.l1_loss(z_diff, torch.zeros(z_diff.shape).cuda())
         ts.collect('Sparsity loss', l1_loss)
 
-        loss = recon_loss + prediction_loss + l1_loss
+        loss = prediction_loss + l1_loss
         loss.backward()
         opt_enc.step()
         opt_dec.step()
