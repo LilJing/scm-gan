@@ -29,16 +29,15 @@ def higgins_metric(simulator, true_latent_dim, encoder, encoded_latent_dim,
     ts = TimeSeries('Computing Higgins Metric', train_iters)
 
     for train_iter in range(train_iters):
-        # Generate batch_size pairs
-        random_factors = np.random.uniform(size=(batch_size, 2, true_latent_dim))
+        def generate_equivariance_test_batch(y_labels):
+            # Generate batch_size pairs
+            random_factors = np.random.uniform(size=(batch_size, 2, true_latent_dim))
 
-        # For each pair, select a factor to set
-        y_labels = np.random.randint(0, true_latent_dim, size=batch_size)
-        for i in range(batch_size):
-            y = y_labels[i]
-            random_factors[i][0][y] = random_factors[i][1][y]
+            # Each pair of images has one factor in common
+            for i in range(batch_size):
+                y_idx = y_labels[i]
+                random_factors[i][0][y_idx] = random_factors[i][1][y_idx]
 
-        def generate_z_diff(y_labels):
             # For each pair, generate images with the simulator and encode the images
             images_left = simulator(random_factors[:,0,:])
             images_right = simulator(random_factors[:,1,:])
@@ -46,16 +45,17 @@ def higgins_metric(simulator, true_latent_dim, encoder, encoded_latent_dim,
             # Now encode each pair and take their difference
             x_left = torch.FloatTensor(images_left).unsqueeze(1).cuda()
             x_right = torch.FloatTensor(images_right).unsqueeze(1).cuda()
-            #encoded_left = encoder(x_left)[:,:encoded_latent_dim].data.cpu().numpy()
             encoded_left = encoder(x_left)[0].data.cpu().numpy()
             encoded_right = encoder(x_right)[0].data.cpu().numpy()
             z_diff = np.abs(encoded_left - encoded_right)
             return z_diff
 
+        # For each pair, select a factor to set
+        y_labels = np.random.randint(0, true_latent_dim, size=batch_size)
         L = 5
         z_diffs = np.zeros((L, batch_size, encoded_latent_dim))
         for l in range(L):
-            z_diffs[l] = generate_z_diff(y_labels)
+            z_diffs[l] = generate_equivariance_test_batch(y_labels)
         z_diff = np.mean(z_diffs, axis=0)
         z_diff = torch.FloatTensor(z_diff).cuda()
 
