@@ -161,6 +161,7 @@ def main():
             higgins_scores.append(trained_score)
             print('Higgins metric before training: {}'.format(higgins_scores[0]))
             print('Higgins metric after training {} iters: {}'.format(train_iter, higgins_scores[-1]))
+            print('Best Higgins: {}'.format(max(higgins_scores)))
             ts.collect('Higgins Metric', trained_score)
     print(ts)
     print('Finished')

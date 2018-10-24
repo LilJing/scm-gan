@@ -112,7 +112,7 @@ def main():
         kld_loss = -0.5 * torch.mean(1 + log_variance - mu.pow(2) - log_variance.exp())
         ts.collect('KLD loss', kld_loss)
 
-        beta = 4.0
+        beta = 100.0
         loss = recon_loss + beta * kld_loss
         loss.backward()
         opt_enc.step()
