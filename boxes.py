@@ -56,7 +56,7 @@ def build_state(width, height, x, y):
     return state
 
 
-def build_dataset(num_actions=4, size=50000):
+def build_dataset(num_actions=4, size=100000):
     dataset = []
     for i in tqdm(range(size)):
         env = BoxesEnv()
