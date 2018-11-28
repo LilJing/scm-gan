@@ -34,6 +34,7 @@ class MinipongEnv():
         elif a[3]:
             self.left_y += 3
         self.left_y %= 64
+
         # Other dimensions change, but not based on agent actions
         self.ball_x += 2
         self.ball_x %= 64
@@ -47,6 +48,12 @@ def build_state(left_y, right_y, ball_x, ball_y):
     ball_size = 2
     left_x = 4
     right_x = GAME_SIZE - 4
+
+    left_y = np.clip(left_y, paddle_height, GAME_SIZE - paddle_height)
+    right_y = np.clip(right_y, paddle_height, GAME_SIZE - paddle_height)
+    ball_x = np.clip(ball_x, paddle_height, GAME_SIZE - paddle_height)
+    ball_y = np.clip(ball_y, paddle_height, GAME_SIZE - paddle_height)
+
     state[left_y - paddle_height:left_y + paddle_height,
                left_x - paddle_width: left_x + paddle_width] = 1.0
     state[right_y - paddle_height:right_y + paddle_height,

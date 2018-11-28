@@ -37,10 +37,6 @@ class Transition(nn.Module):
 
         # Fern hack: Predict a delta/displacement
         x = x + z
-
-        # Normalize to the ball
-        norm = torch.norm(x, p=2, dim=1)
-        x = x / (norm.expand(1, -1).t() + .0001)
         return x
 
 
@@ -49,18 +45,32 @@ class Encoder(nn.Module):
         super().__init__()
         self.latent_size = latent_size
         # Bx1x64x64
-        self.fc1 = nn.Linear(64*64, 120)
-        self.bn1 = nn.BatchNorm1d(120)
-        self.fc2 = nn.Linear(120, 120)
-        self.bn2 = nn.BatchNorm1d(120)
-        self.fc3 = nn.Linear(120, latent_size)
+        self.conv1 = nn.Conv2d(1, 8, 4, stride=2, padding=1)
+        self.bn_conv1 = nn.BatchNorm2d(8)
+        # Bx8x32x32
+        self.conv2 = nn.Conv2d(8, 32, 4, stride=2, padding=1)
+        self.bn_conv2 = nn.BatchNorm2d(32)
+
+        self.fc1 = nn.Linear(32*16*16, 196)
+        self.bn1 = nn.BatchNorm1d(196)
+        self.fc2 = nn.Linear(196, 196)
+        self.bn2 = nn.BatchNorm1d(196)
+        self.fc3 = nn.Linear(196, latent_size)
 
         # Bxlatent_size
         self.cuda()
 
     def forward(self, x):
         # Input: B x 1 x 64 x 64
-        x = x.view(-1, 64*64)
+        x = self.conv1(x)
+        x = self.bn_conv1(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv2(x)
+        x = self.bn_conv2(x)
+        x = F.leaky_relu(x)
+
+        x = x.view(-1, 32*16*16)
         x = self.fc1(x)
         x = self.bn1(x)
         x = F.leaky_relu(x)
@@ -70,9 +80,6 @@ class Encoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.fc3(x)
-        # Normalize to the ball
-        norm = torch.norm(x, p=2, dim=1)
-        x = x / (norm.expand(1, -1).t() + .0001)
         return x
 
 
@@ -80,14 +87,18 @@ class Decoder(nn.Module):
     def __init__(self, latent_size):
         super().__init__()
         self.latent_size = latent_size
-        self.fc1 = nn.Linear(latent_size, 120)
-        self.bn1 = nn.BatchNorm1d(120)
-        self.fc2 = nn.Linear(120, 120)
-        self.bn2 = nn.BatchNorm1d(120)
-        self.fc3 = nn.Linear(120, 120)
-        self.bn3 = nn.BatchNorm1d(120)
-        self.fc4 = nn.Linear(120, 4096)
-        # B x 1 x 64 x 64
+        self.fc1 = nn.Linear(latent_size, 196)
+        self.bn1 = nn.BatchNorm1d(196)
+        self.fc2 = nn.Linear(196, 196)
+        self.bn2 = nn.BatchNorm1d(196)
+        self.fc3 = nn.Linear(196, 2048)
+        self.bn3 = nn.BatchNorm1d(2048)
+
+        self.conv1 = nn.ConvTranspose2d(32, 32, 4, stride=2, padding=1)
+        self.bn_conv1 = nn.BatchNorm2d(32)
+        self.conv2 = nn.ConvTranspose2d(32, 32, 4, stride=2, padding=1)
+        self.bn_conv2 = nn.BatchNorm2d(32)
+        self.conv3 = nn.ConvTranspose2d(32, 1, 4, stride=2, padding=1)
         self.cuda()
 
     def forward(self, x):
@@ -100,9 +111,16 @@ class Decoder(nn.Module):
         x = self.fc3(x)
         x = self.bn3(x)
         x = F.leaky_relu(x, 0.2)
-        x = self.fc4(x)
-        #x = torch.sigmoid(x)
-        x = x.view(-1, 1, 64, 64)
+
+        x = x.view(-1, 32, 8, 8)
+        x = self.conv1(x)
+        x = self.bn_conv1(x)
+        x = F.leaky_relu(x, 0.2)
+        x = self.conv2(x)
+        x = self.bn_conv2(x)
+        x = F.leaky_relu(x, 0.2)
+        x = self.conv3(x)
+        x = F.leaky_relu(x, 0.2)
         return x
 
 
@@ -150,14 +168,15 @@ def imq_kernel(X: torch.Tensor,
 def mmd_normal_penalty(z, sigma=1.0):
     batch_size, latent_dim = z.shape
     z_fake = torch.randn(batch_size, latent_dim).cuda() * sigma
-
-    # Normalize to the ball
-    norm = torch.norm(z_fake, p=2, dim=1)
-    z_fake = z_fake / (norm.expand(1, -1).t() + .0001)
-
-
     mmd_loss = -imq_kernel(z, z_fake, h_dim=latent_dim)
     return mmd_loss.mean()
+
+
+# Normalize a batch of latent points to the unit hypersphere
+def norm(x):
+    norm = torch.norm(x, p=2, dim=1)
+    x = x / (norm.expand(1, -1).t() + .0001)
+    return x
 
 
 def main():
