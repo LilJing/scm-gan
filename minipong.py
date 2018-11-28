@@ -14,10 +14,10 @@ def init():
 
 class MinipongEnv():
     def __init__(self):
-        self.left_y = np.random.randint(10, 50)
-        self.right_y = np.random.randint(10, 50)
-        self.ball_x = np.random.randint(2, 62)
-        self.ball_y = np.random.randint(2, 62)
+        self.left_y = np.random.randint(0, 64)
+        self.right_y = np.random.randint(0, 64)
+        self.ball_x = np.random.randint(0, 64)
+        self.ball_y = np.random.randint(0, 64)
         self.state = build_state(self.left_y, self.right_y, self.ball_x, self.ball_y)
 
     # The agent can press one of four buttons
@@ -27,16 +27,16 @@ class MinipongEnv():
             self.right_y -= 3
         elif a[1]:
             self.right_y += 3
+        self.right_y %= 64
 
         if a[2]:
             self.left_y -= 3
         elif a[3]:
             self.left_y += 3
+        self.left_y %= 64
         # Other dimensions change, but not based on agent actions
-        self.ball_x += 1
-        if self.ball_x >= 62:
-            self.ball_x -= (62 - 2)
-        #self.ball_y += 1
+        self.ball_x += 2
+        self.ball_x %= 64
         self.state = build_state(self.left_y, self.right_y, self.ball_x, self.ball_y)
 
 
