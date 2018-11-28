@@ -33,7 +33,7 @@ class BoxesEnv():
         elif a[3]:
             self.y += 3
         # Other dimensions change, but not based on agent actions
-        self.width -= 3
+        #self.width -= 3
         self.state = build_state(self.width, self.height, self.x, self.y)
 
 

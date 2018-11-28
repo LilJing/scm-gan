@@ -37,6 +37,7 @@ class Transition(nn.Module):
 
         # Fern hack: Predict a delta/displacement
         x = x + z
+        x = norm(x)
         return x
 
 
@@ -80,6 +81,7 @@ class Encoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.fc3(x)
+        x = norm(x)
         return x
 
 
@@ -168,6 +170,7 @@ def imq_kernel(X: torch.Tensor,
 def mmd_normal_penalty(z, sigma=1.0):
     batch_size, latent_dim = z.shape
     z_fake = torch.randn(batch_size, latent_dim).cuda() * sigma
+    z_fake = norm(z_fake)
     mmd_loss = -imq_kernel(z, z_fake, h_dim=latent_dim)
     return mmd_loss.mean()
 
@@ -183,9 +186,9 @@ def main():
     datasource.init()
 
     # Compute Higgins metric for a randomly-initialized convolutional encoder
-    batch_size = 32
-    latent_dim = 6
-    true_latent_dim = 6
+    batch_size = 64
+    latent_dim = 10
+    true_latent_dim = 4
     num_actions = 4
     encoder = Encoder(latent_dim)
     decoder = Decoder(latent_dim)
@@ -196,7 +199,7 @@ def main():
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
-    train_iters = 100 * 1000
+    train_iters = 50 * 1000
     ts = TimeSeries('Training Autoencoder', train_iters)
     for train_iter in range(train_iters + 1):
         encoder.train()
@@ -226,7 +229,12 @@ def main():
         prediction_loss = F.binary_cross_entropy_with_logits(predicted_logits, x_tplusone, reduction='sum')
         ts.collect('Prediction loss', prediction_loss)
 
-        mmd_loss = 1000 * (mmd_normal_penalty(z) + mmd_normal_penalty(z_tplusone))
+        # MMD penalty for the future
+        mmd_loss = 0
+        z_t = z
+        for i in range(10):
+            z_t = transition(z_t, a_t)
+            mmd_loss += 1000 * mmd_normal_penalty(z_t)
         ts.collect('MMD Loss', mmd_loss)
 
         loss = prediction_loss + recon_loss + mmd_loss
