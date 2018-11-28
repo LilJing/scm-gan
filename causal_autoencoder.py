@@ -34,8 +34,14 @@ class Transition(nn.Module):
         x = self.fc1(x)
         x = F.leaky_relu(x, 0.2)
         x = self.fc2(x)
+
         # Fern hack: Predict a delta/displacement
-        return z + x
+        x = x + z
+
+        # Normalize to the ball
+        norm = torch.norm(x, p=2, dim=1)
+        x = x / (norm.expand(1, -1).t() + .0001)
+        return x
 
 
 class Encoder(nn.Module):
@@ -64,6 +70,9 @@ class Encoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.fc3(x)
+        # Normalize to the ball
+        norm = torch.norm(x, p=2, dim=1)
+        x = x / (norm.expand(1, -1).t() + .0001)
         return x
 
 
@@ -141,6 +150,12 @@ def imq_kernel(X: torch.Tensor,
 def mmd_normal_penalty(z, sigma=1.0):
     batch_size, latent_dim = z.shape
     z_fake = torch.randn(batch_size, latent_dim).cuda() * sigma
+
+    # Normalize to the ball
+    norm = torch.norm(z_fake, p=2, dim=1)
+    z_fake = z_fake / (norm.expand(1, -1).t() + .0001)
+
+
     mmd_loss = -imq_kernel(z, z_fake, h_dim=latent_dim)
     return mmd_loss.mean()
 

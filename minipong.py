@@ -34,6 +34,8 @@ class MinipongEnv():
             self.left_y += 3
         # Other dimensions change, but not based on agent actions
         self.ball_x += 1
+        if self.ball_x >= 62:
+            self.ball_x -= (62 - 2)
         #self.ball_y += 1
         self.state = build_state(self.left_y, self.right_y, self.ball_x, self.ball_y)
 
