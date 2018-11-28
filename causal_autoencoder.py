@@ -228,12 +228,13 @@ def main():
             imutil.show(img, filename=filename, caption=caption, img_padding=4, font_size=10)
         if train_iter % 2000 == 0:
             vid = imutil.VideoMaker('simulation_iter_{:06d}.jpg'.format(train_iter))
-            for frame in range(100):
+            for frame in range(60):
                 z = transition(z, a_t)
                 predicted = torch.sigmoid(decoder(z))
                 img = torch.cat((x[:4], predicted[:4]), dim=3)
-                caption = 'Est. future t+{}'.format(frame)
-                vid.write_frame(img, filename=filename, caption=caption, img_padding=4, font_size=10)
+                caption = 'Pred. t+{} a={}'.format(frame, torch.argmax(a_t[:4], dim=1).cpu().numpy())
+                vid.write_frame(img, filename=filename, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
+                vid.write_frame(img, filename=filename, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
             vid.finish()
         """"
         if train_iter % 10000 == 0:
