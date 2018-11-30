@@ -187,7 +187,7 @@ def main():
 
     # Compute Higgins metric for a randomly-initialized convolutional encoder
     batch_size = 64
-    latent_dim = 10
+    latent_dim = 4
     true_latent_dim = 4
     num_actions = 4
     encoder = Encoder(latent_dim)
@@ -219,14 +219,14 @@ def main():
         reconstructed = torch.sigmoid(reconstructed_logits)
 
         #recon_loss = torch.sum((x - reconstructed) ** 2)
-        recon_loss = F.binary_cross_entropy_with_logits(reconstructed_logits, x, reduction='sum')
+        recon_loss = F.binary_cross_entropy_with_logits(reconstructed_logits, x)
         ts.collect('Reconstruction loss', recon_loss)
 
         z_tplusone = transition(z, a_t)
         predicted_logits = decoder(z_tplusone)
         predicted = torch.sigmoid(predicted_logits)
         #prediction_loss = torch.sum((predicted - x_tplusone) ** 2)
-        prediction_loss = F.binary_cross_entropy_with_logits(predicted_logits, x_tplusone, reduction='sum')
+        prediction_loss = F.binary_cross_entropy_with_logits(predicted_logits, x_tplusone)
         ts.collect('Prediction loss', prediction_loss)
 
         # MMD penalty for the future
@@ -234,7 +234,7 @@ def main():
         z_t = z
         for i in range(10):
             z_t = transition(z_t, a_t)
-            mmd_loss += 1000 * mmd_normal_penalty(z_t)
+            mmd_loss += 10000 * mmd_normal_penalty(z_t)
         ts.collect('MMD Loss', mmd_loss)
 
         loss = prediction_loss + recon_loss + mmd_loss
@@ -257,6 +257,7 @@ def main():
             vid = imutil.VideoMaker('simulation_iter_{:06d}.jpg'.format(train_iter))
             for frame in range(60):
                 z = transition(z, a_t)
+                a_t = torch.cat((a_t[-1:], a_t[:-1]))
                 predicted = torch.sigmoid(decoder(z))
                 img = torch.cat((x[:4], predicted[:4]), dim=3)
                 caption = 'Pred. t+{} a={}'.format(frame, torch.argmax(a_t[:4], dim=1).cpu().numpy())

@@ -14,10 +14,10 @@ def init():
 
 class BoxesEnv():
     def __init__(self):
-        self.width = np.random.uniform(5, 20)
-        self.height = np.random.randint(5, 20)
-        self.x = np.random.randint(20, 46)
-        self.y = np.random.randint(20, 46)
+        self.width = np.random.uniform(5, 10)
+        self.height = np.random.randint(5, 10)
+        self.x = np.random.randint(0, GAME_SIZE)
+        self.y = np.random.randint(0, GAME_SIZE)
         self.state = build_state(self.width, self.height, self.x, self.y)
 
     # The agent can press one of four buttons
@@ -39,10 +39,10 @@ class BoxesEnv():
 
 # Continuous inputs are in the range [0, 1] for each dimension
 def generate_image_continuous(factors):
-    width = int(factors[0] * 15) + 5
-    height = int(factors[1] * 15) + 5
-    x = int(factors[2] * 26) + 20
-    y = int(factors[3] * 26) + 20
+    width = int(factors[0] * 5) + 5
+    height = int(factors[1] * 5) + 5
+    x = int(factors[2] * GAME_SIZE)
+    y = int(factors[3] * GAME_SIZE)
     return build_state(width, height, x, y)
 
 
@@ -52,6 +52,10 @@ def build_state(width, height, x, y):
     y1 = int(y + height)
     x0 = int(x - width)
     x1 = int(x + width)
+    y0 = np.clip(y0, 0, GAME_SIZE - 1)
+    y1 = np.clip(y1, 0, GAME_SIZE - 1)
+    x0 = np.clip(x0, 0, GAME_SIZE - 1)
+    x1 = np.clip(x1, 0, GAME_SIZE - 1)
     state[y0:y1, x0:x1] = 1.0
     return state
 
