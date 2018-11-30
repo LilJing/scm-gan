@@ -86,12 +86,13 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, latent_size):
+    def __init__(self, latent_size, k=64):
         super().__init__()
         self.latent_size = latent_size
-        self.fc1 = nn.Linear(latent_size, 196)
-        self.bn1 = nn.BatchNorm1d(196)
-        self.fc2 = nn.Linear(196, 196)
+        self.k = k
+        self.fc1 = nn.Linear(latent_size*k, 128)
+        self.bn1 = nn.BatchNorm1d(128)
+        self.fc2 = nn.Linear(128, 196)
         self.bn2 = nn.BatchNorm1d(196)
         self.fc3 = nn.Linear(196, 2048)
         self.bn3 = nn.BatchNorm1d(2048)
@@ -101,9 +102,16 @@ class Decoder(nn.Module):
         self.conv2 = nn.ConvTranspose2d(32, 32, 4, stride=2, padding=1)
         self.bn_conv2 = nn.BatchNorm2d(32)
         self.conv3 = nn.ConvTranspose2d(32, 1, 4, stride=2, padding=1)
+
+        self.sod1 = SelfOrganizingDiscretization(z=latent_size, k=k)
         self.cuda()
 
+
+
     def forward(self, x):
+        x = self.sod1(x)
+        x = x.reshape(-1, self.latent_size*self.k)
+
         x = self.fc1(x)
         x = self.bn1(x)
         x = F.leaky_relu(x, 0.2)
@@ -124,6 +132,32 @@ class Decoder(nn.Module):
         x = self.conv3(x)
         x = F.leaky_relu(x, 0.2)
         return x
+
+
+class SelfOrganizingDiscretization(nn.Module):
+    def __init__(self, z, k, kernel='inverse_multiquadratic'):
+        super().__init__()
+        self.z = z
+        self.k = k
+        rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1)
+        self.particles = torch.nn.Parameter(rho)
+        self.cuda()
+
+    def forward(self, x):
+        # x is a real-valued tensor size (batch, Z)
+        batch_size = len(x)
+        # Broadcast x to (batch, Z, K)
+        perceived_locations = x.unsqueeze(-1).repeat(1, 1, self.k)
+        reference_locations = self.particles.unsqueeze(0).repeat(batch_size, 1, 1)
+        distances = (perceived_locations - reference_locations) ** 2
+        # IMQ kernel
+        kern = .01 / (.01 + distances)
+        # Gaussian RBF kernel
+        # kern = torch.exp(-distances)
+        # Output is a category between 1 and K, for each of the Z real values
+        return torch.softmax(kern, dim=2)
+
+
 
 
 # Inverse multiquadratic kernel with varying kernel bandwidth
@@ -232,9 +266,9 @@ def main():
         # MMD penalty for the future
         mmd_loss = 0
         z_t = z
-        for i in range(10):
+        for i in range(1):
             z_t = transition(z_t, a_t)
-            mmd_loss += 10000 * mmd_normal_penalty(z_t)
+            mmd_loss += 1000 * mmd_normal_penalty(z_t)
         ts.collect('MMD Loss', mmd_loss)
 
         loss = prediction_loss + recon_loss + mmd_loss
