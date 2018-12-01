@@ -92,13 +92,13 @@ class Decoder(nn.Module):
         self.latent_size = latent_size
         self.k = k
 
-        self.conv1 = nn.Conv2d(latent_size, 32, 3, padding=1)
+        self.conv1 = nn.Conv2d(latent_size, 32, 4, stride=2, padding=1)
         self.bn_conv1 = nn.BatchNorm2d(32)
-        self.conv2 = nn.Conv2d(32, 32, 3, padding=1)
+        self.conv2 = nn.Conv2d(32, 32, 4, stride=2, padding=1)
         self.bn_conv2 = nn.BatchNorm2d(32)
-        self.conv3 = nn.Conv2d(32, 32, 3, padding=1)
+        self.conv3 = nn.ConvTranspose2d(32, 32, 4, stride=2, padding=1)
         self.bn_conv3 = nn.BatchNorm2d(32)
-        self.conv4 = nn.Conv2d(32, 1, 3, padding=1)
+        self.conv4 = nn.ConvTranspose2d(32, 1, 4, stride=2, padding=1)
 
         """
         self.fc1 = nn.Linear(latent_size*k, 128)
@@ -187,8 +187,8 @@ class SelfOrganizingBucket(nn.Module):
         self.z = z
         self.k = k
         rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
-        #self.particles = torch.nn.Parameter(rho)
-        self.particles = rho
+        self.particles = torch.nn.Parameter(rho)
+        #self.particles = rho
         self.cuda()
         self.video = imutil.VideoMaker('self_organizing_activations.mp4')
 
@@ -275,7 +275,7 @@ def main():
 
     # Compute Higgins metric for a randomly-initialized convolutional encoder
     batch_size = 64
-    latent_dim = 4
+    latent_dim = 10
     true_latent_dim = 4
     num_actions = 4
     encoder = Encoder(latent_dim)
@@ -336,7 +336,7 @@ def main():
         decoder.eval()
         transition.eval()
 
-        if train_iter and train_iter % 100 == 0:
+        if train_iter and train_iter % 1000 == 0:
             filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
             img = torch.cat((x[:4], reconstructed[:4]), dim=3)
             caption = 'D(E(x)) iter {}'.format(train_iter)
