@@ -8,13 +8,13 @@ import imutil
 
 # We don't want eg. Xavier initialization here
 # The RNN gradient should explode, not vanish
-def init_conv_weight(conv):
-    #conv.weight.data.normal_(0, 1)
+def init_conv_weight(conv, channels):
+    conv.weight.data.normal_(0, channels)
     pass
 
-def init_gru_weight(gru):
-    #gru.weight_hh_l0.data.normal_(0, 1)
-    #gru.weight_ih_l0.data.normal_(0, 1)
+def init_gru_weight(gru, channels):
+    gru.weight_hh_l0.data.normal_(0, channels)
+    gru.weight_ih_l0.data.normal_(0, channels)
     pass
 
 
@@ -34,14 +34,14 @@ class CSRN(nn.Module):
         self.rnn_right = nn.GRU(self.rnn_in, self.rnn_out, bias=False)
         self.conv_combine = nn.Conv2d(self.rnn_in * 4, channels, kernel_size=1)
 
-        init_conv_weight(self.conv_down)
-        init_conv_weight(self.conv_up)
-        init_conv_weight(self.conv_left)
-        init_conv_weight(self.conv_right)
-        init_gru_weight(self.rnn_down)
-        init_gru_weight(self.rnn_up)
-        init_gru_weight(self.rnn_left)
-        init_gru_weight(self.rnn_right)
+        init_conv_weight(self.conv_down, channels)
+        init_conv_weight(self.conv_up, channels)
+        init_conv_weight(self.conv_left, channels)
+        init_conv_weight(self.conv_right, channels)
+        init_gru_weight(self.rnn_down, channels)
+        init_gru_weight(self.rnn_up, channels)
+        init_gru_weight(self.rnn_left, channels)
+        init_gru_weight(self.rnn_right, channels)
 
     def forward(self, x):
         batch_size, channels, height, width = x.shape

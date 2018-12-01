@@ -13,6 +13,7 @@ import torch.optim as optim
 import imutil
 from logutil import TimeSeries
 from tqdm import tqdm
+from spatial_recurrent import CSRN
 
 from higgins import higgins_metric
 
@@ -90,6 +91,16 @@ class Decoder(nn.Module):
         super().__init__()
         self.latent_size = latent_size
         self.k = k
+
+        self.conv1 = nn.Conv2d(latent_size, 32, 3, padding=1)
+        self.bn_conv1 = nn.BatchNorm2d(32)
+        self.conv2 = nn.Conv2d(32, 32, 3, padding=1)
+        self.bn_conv2 = nn.BatchNorm2d(32)
+        self.conv3 = nn.Conv2d(32, 32, 3, padding=1)
+        self.bn_conv3 = nn.BatchNorm2d(32)
+        self.conv4 = nn.Conv2d(32, 1, 3, padding=1)
+
+        """
         self.fc1 = nn.Linear(latent_size*k, 128)
         self.bn1 = nn.BatchNorm1d(128)
         self.fc2 = nn.Linear(128, 196)
@@ -102,15 +113,40 @@ class Decoder(nn.Module):
         self.conv2 = nn.ConvTranspose2d(32, 32, 4, stride=2, padding=1)
         self.bn_conv2 = nn.BatchNorm2d(32)
         self.conv3 = nn.ConvTranspose2d(32, 1, 4, stride=2, padding=1)
-
-        self.sod1 = SelfOrganizingBucket(z=latent_size, k=k)
+        # output: batchx1x64x64
+        """
+        #self.csrn1 = CSRN(latent_size)
+        self.to_categorical = SelfOrganizingBucket(z=latent_size, k=k)
+        #self.fc_where = nn.Linear(latent_size * k, 64*64)
         self.cuda()
 
     def forward(self, x):
-        x = self.sod1(x)
-        x = x.reshape(-1, self.latent_size*self.k)
-        #imutil.show(x, save=False)
+        # The world consists of things in places.
+        x = self.to_categorical(x)
+        places = torch.zeros((len(x), self.latent_size, self.k, self.k)).cuda()
+        # Cycle of outer products
+        for i in range(self.latent_size):
+            places[:, i] = torch.einsum('ij,ik->ijk', [x[:,i], x[:,i-1]])
 
+        # try csrn?
+        #x = self.csrn1(places)
+        #x = F.leaky_relu(x)
+        #imutil.show(torch.cat([places[0], x[0]]))
+        x = places * self.k
+
+        # Given places, make some things
+        x = self.conv1(x)
+        x = self.bn_conv1(x)
+        x = F.leaky_relu(x, 0.2)
+        x = self.conv2(x)
+        x = self.bn_conv2(x)
+        x = F.leaky_relu(x, 0.2)
+        x = self.conv3(x)
+        x = F.leaky_relu(x, 0.2)
+        x = self.conv4(x)
+
+
+        """
         x = self.fc1(x)
         x = self.bn1(x)
         x = F.leaky_relu(x, 0.2)
@@ -130,6 +166,7 @@ class Decoder(nn.Module):
         x = F.leaky_relu(x, 0.2)
         x = self.conv3(x)
         x = F.leaky_relu(x, 0.2)
+        """
         return x
 
 
@@ -280,7 +317,6 @@ def main():
         prediction_loss = F.binary_cross_entropy_with_logits(predicted_logits, x_tplusone)
         ts.collect('Prediction loss', prediction_loss)
 
-        """
         # MMD penalty for the future
         mmd_loss = 0
         z_t = z
@@ -288,7 +324,6 @@ def main():
             z_t = transition(z_t, a_t)
             mmd_loss += 1000 * mmd_normal_penalty(z_t)
         ts.collect('MMD Loss', mmd_loss)
-        """
 
         loss = prediction_loss + recon_loss #+ mmd_loss
         loss.backward()
@@ -301,7 +336,7 @@ def main():
         decoder.eval()
         transition.eval()
 
-        if train_iter % 1000 == 0:
+        if train_iter and train_iter % 100 == 0:
             filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
             img = torch.cat((x[:4], reconstructed[:4]), dim=3)
             caption = 'D(E(x)) iter {}'.format(train_iter)
@@ -309,7 +344,7 @@ def main():
 
             # Video of latent space traversal
             vid = imutil.VideoMaker('latent_traversal_dims_{:04d}_iter_{:06d}'.format(latent_dim, train_iter))
-            minval, maxval = decoder.sod1.particles.min(), decoder.sod1.particles.max()
+            minval, maxval = decoder.to_categorical.particles.min(), decoder.to_categorical.particles.max()
             # Pick a batch with one image per latent dim
             for i in range(1, latent_dim):
                 x[i] = x[0]
