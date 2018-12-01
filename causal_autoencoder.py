@@ -46,6 +46,7 @@ class Transition(nn.Module):
         x = torch.softmax(x, dim=2)
         x = x.view(len(z), self.latent_size*self.k)
         x = self.to_dense(x)
+        x = norm(x)
         return x
 
 
@@ -89,7 +90,7 @@ class Encoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.fc3(x)
-        #x = norm(x)
+        x = norm(x)
         return x
 
 
@@ -197,7 +198,6 @@ class SelfOrganizingBucket(nn.Module):
         self.particles = torch.nn.Parameter(rho)
         #self.particles = rho
         self.cuda()
-        self.video = imutil.VideoMaker('self_organizing_activations.mp4')
 
     def forward(self, x):
         # x is a real-valued tensor size (batch, Z)
@@ -217,7 +217,6 @@ class SelfOrganizingBucket(nn.Module):
         #for i in range(1, self.k):
         #    therm[:, :, i] = torch.max(probs[:, :, i], therm[:, :, i - 1].clone())
         #return 1 - therm
-        self.video.write_frame(probs)
         return probs
 
 
@@ -265,7 +264,7 @@ def imq_kernel(X: torch.Tensor,
 def mmd_normal_penalty(z, sigma=1.0):
     batch_size, latent_dim = z.shape
     z_fake = torch.randn(batch_size, latent_dim).cuda() * sigma
-    #z_fake = norm(z_fake)
+    z_fake = norm(z_fake)
     mmd_loss = -imq_kernel(z, z_fake, h_dim=latent_dim)
     return mmd_loss.mean()
 
@@ -280,7 +279,6 @@ def norm(x):
 def main():
     datasource.init()
 
-    # Compute Higgins metric for a randomly-initialized convolutional encoder
     batch_size = 64
     latent_dim = 10
     true_latent_dim = 4
@@ -324,13 +322,14 @@ def main():
         prediction_loss = F.binary_cross_entropy_with_logits(predicted_logits, x_tplusone)
         ts.collect('Prediction loss', prediction_loss)
 
-        # MMD penalty for the future
+        """
         mmd_loss = 0
         z_t = z
         for i in range(1):
             z_t = transition(z_t, a_t)
             mmd_loss += 1000 * mmd_normal_penalty(z_t)
         ts.collect('MMD Loss', mmd_loss)
+        """
 
         loss = prediction_loss + recon_loss #+ mmd_loss
         loss.backward()
@@ -355,19 +354,31 @@ def main():
             # Pick a batch with one image per latent dim
             for i in range(1, latent_dim):
                 x[i] = x[0]
-            z = encoder(x[:latent_dim])
+            zt = encoder(x[:latent_dim])
             frames = 120
             for frame_idx in range(frames):
                 for z_idx in range(latent_dim):
                     z_val = (frame_idx / frames) * (maxval - minval) + minval
-                    z[z_idx, z_idx] = z_val
-                output = torch.sigmoid(decoder(z))
+                    zt[z_idx, z_idx] = z_val
+                output = torch.sigmoid(decoder(norm(zt)))
                 caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
                 vid.write_frame(output, resize_to=(800,800), caption=caption, img_padding=8)
             vid.finish()
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
             torch.save(decoder.state_dict(), 'model-decoder.pth')
+        if train_iter % 2000 == 0:
+            vid = imutil.VideoMaker('simulation_iter_{:06d}.jpg'.format(train_iter))
+            zt = z.clone()[:4]
+            a_t = a_t[:4]
+            for frame in range(60):
+                predicted = torch.sigmoid(decoder(zt))
+                img = torch.cat((x[:4], predicted[:4]), dim=3)
+                caption = 'Pred. t+{} a={}'.format(frame, torch.argmax(a_t[:4], dim=1).cpu().numpy())
+                vid.write_frame(img, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
+                z = transition(zt, a_t)
+                a_t = torch.cat((a_t[-1:], a_t[:-1]))
+            vid.finish()
         # Periodically compute the Higgins score
         if train_iter % 10000 == 0:
             trained_score = higgins_metric(datasource.simulator, true_latent_dim, encoder, latent_dim)
