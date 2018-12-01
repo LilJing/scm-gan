@@ -103,14 +103,13 @@ class Decoder(nn.Module):
         self.bn_conv2 = nn.BatchNorm2d(32)
         self.conv3 = nn.ConvTranspose2d(32, 1, 4, stride=2, padding=1)
 
-        self.sod1 = SelfOrganizingDiscretization(z=latent_size, k=k)
+        self.sod1 = SelfOrganizingThermometer(z=latent_size, k=k)
         self.cuda()
-
-
 
     def forward(self, x):
         x = self.sod1(x)
         x = x.reshape(-1, self.latent_size*self.k)
+        #imutil.show(x, save=False)
 
         x = self.fc1(x)
         x = self.bn1(x)
@@ -134,7 +133,14 @@ class Decoder(nn.Module):
         return x
 
 
-class SelfOrganizingDiscretization(nn.Module):
+class SelfOrganizingThermometer(nn.Module):
+    """
+    Input: Real values eg. -0.25, 4.1, 0
+    Output: Thermometer encoding like:
+        11110000000000
+        11111111111111
+        11111111000000
+    """
     def __init__(self, z, k, kernel='inverse_multiquadratic'):
         super().__init__()
         self.z = z
@@ -155,9 +161,12 @@ class SelfOrganizingDiscretization(nn.Module):
         # Gaussian RBF kernel
         # kern = torch.exp(-distances)
         # Output is a category between 1 and K, for each of the Z real values
-        return torch.softmax(kern, dim=2)
-
-
+        probs = torch.softmax(kern, dim=2)
+        # Thermometer encoding
+        therm = probs.clone()
+        for i in range(1, self.k):
+            therm[:, :, i] = torch.max(probs[:, :, i], therm[:, :, i - 1].clone())
+        return 1 - therm
 
 
 # Inverse multiquadratic kernel with varying kernel bandwidth
@@ -263,6 +272,7 @@ def main():
         prediction_loss = F.binary_cross_entropy_with_logits(predicted_logits, x_tplusone)
         ts.collect('Prediction loss', prediction_loss)
 
+        """
         # MMD penalty for the future
         mmd_loss = 0
         z_t = z
@@ -270,8 +280,9 @@ def main():
             z_t = transition(z_t, a_t)
             mmd_loss += 1000 * mmd_normal_penalty(z_t)
         ts.collect('MMD Loss', mmd_loss)
+        """
 
-        loss = prediction_loss + recon_loss + mmd_loss
+        loss = prediction_loss + recon_loss #+ mmd_loss
         loss.backward()
         opt_enc.step()
         opt_dec.step()
@@ -287,27 +298,26 @@ def main():
             img = torch.cat((x[:4], reconstructed[:4]), dim=3)
             caption = 'D(E(x)) iter {}'.format(train_iter)
             imutil.show(img, filename=filename, caption=caption, img_padding=4, font_size=10)
-        if train_iter % 2000 == 0:
-            vid = imutil.VideoMaker('simulation_iter_{:06d}.jpg'.format(train_iter))
-            for frame in range(60):
-                z = transition(z, a_t)
-                a_t = torch.cat((a_t[-1:], a_t[:-1]))
-                predicted = torch.sigmoid(decoder(z))
-                img = torch.cat((x[:4], predicted[:4]), dim=3)
-                caption = 'Pred. t+{} a={}'.format(frame, torch.argmax(a_t[:4], dim=1).cpu().numpy())
-                vid.write_frame(img, filename=filename, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
-                vid.write_frame(img, filename=filename, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
+
+            # Video of latent space traversal
+            vid = imutil.VideoMaker('latent_traversal_dims_{:04d}_iter_{:06d}'.format(latent_dim, train_iter))
+            minval, maxval = decoder.sod1.particles.min(), decoder.sod1.particles.max()
+            # Pick a batch with one image per latent dim
+            for i in range(1, latent_dim):
+                x[i] = x[0]
+            z = encoder(x[:latent_dim])
+            frames = 120
+            for frame_idx in range(frames):
+                for z_idx in range(latent_dim):
+                    z_val = (frame_idx / frames) * (maxval - minval) + minval
+                    z[z_idx, z_idx] = z_val
+                output = torch.sigmoid(decoder(z))
+                caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
+                vid.write_frame(output, resize_to=(800,800), caption=caption, img_padding=8)
             vid.finish()
-        """"
-        if train_iter % 10000 == 0:
-            # Compute metric again after training
-            trained_score = higgins_metric(datasource.simulator, true_latent_dim, encoder, latent_dim)
-            higgins_scores.append(trained_score)
-            print('Higgins metric before training: {}'.format(higgins_scores[0]))
-            print('Higgins metric after training {} iters: {}'.format(train_iter, higgins_scores[-1]))
-            print('Best Higgins: {}'.format(max(higgins_scores)))
-            ts.collect('Higgins Metric', trained_score)
-        """
+            torch.save(transition.state_dict(), 'model-transition.pth')
+            torch.save(encoder.state_dict(), 'model-encoder.pth')
+            torch.save(decoder.state_dict(), 'model-decoder.pth')
     print(ts)
     print('Finished')
 
