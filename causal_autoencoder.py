@@ -103,7 +103,7 @@ class Decoder(nn.Module):
         self.bn_conv2 = nn.BatchNorm2d(32)
         self.conv3 = nn.ConvTranspose2d(32, 1, 4, stride=2, padding=1)
 
-        self.sod1 = SelfOrganizingThermometer(z=latent_size, k=k)
+        self.sod1 = SelfOrganizingBucket(z=latent_size, k=k)
         self.cuda()
 
     def forward(self, x):
@@ -133,10 +133,14 @@ class Decoder(nn.Module):
         return x
 
 
-class SelfOrganizingThermometer(nn.Module):
+class SelfOrganizingBucket(nn.Module):
     """
     Input: Real values eg. -0.25, 4.1, 0
-    Output: Thermometer encoding like:
+    Output: Categorical encoding like:
+        00010000000000
+        00000000000001
+        00000001000000
+    OR Thermometer encoding like:
         11110000000000
         11111111111111
         11111111000000
@@ -145,9 +149,11 @@ class SelfOrganizingThermometer(nn.Module):
         super().__init__()
         self.z = z
         self.k = k
-        rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1)
-        self.particles = torch.nn.Parameter(rho)
+        rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
+        #self.particles = torch.nn.Parameter(rho)
+        self.particles = rho
         self.cuda()
+        self.video = imutil.VideoMaker('self_organizing_activations.mp4')
 
     def forward(self, x):
         # x is a real-valued tensor size (batch, Z)
@@ -163,10 +169,12 @@ class SelfOrganizingThermometer(nn.Module):
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
         # Thermometer encoding
-        therm = probs.clone()
-        for i in range(1, self.k):
-            therm[:, :, i] = torch.max(probs[:, :, i], therm[:, :, i - 1].clone())
-        return 1 - therm
+        #therm = probs.clone()
+        #for i in range(1, self.k):
+        #    therm[:, :, i] = torch.max(probs[:, :, i], therm[:, :, i - 1].clone())
+        #return 1 - therm
+        self.video.write_frame(probs)
+        return probs
 
 
 # Inverse multiquadratic kernel with varying kernel bandwidth

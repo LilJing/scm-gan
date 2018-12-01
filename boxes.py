@@ -16,8 +16,8 @@ class BoxesEnv():
     def __init__(self):
         self.width = np.random.uniform(5, 10)
         self.height = np.random.randint(5, 10)
-        self.x = np.random.randint(0, GAME_SIZE)
-        self.y = np.random.randint(0, GAME_SIZE)
+        self.x = np.random.randint(0 + 4, GAME_SIZE - 4)
+        self.y = np.random.randint(0 + 4, GAME_SIZE - 4)
         self.state = build_state(self.width, self.height, self.x, self.y)
 
     # The agent can press one of four buttons
