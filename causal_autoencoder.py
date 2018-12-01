@@ -361,6 +361,14 @@ def main():
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
             torch.save(decoder.state_dict(), 'model-decoder.pth')
+        # Periodically compute the Higgins score
+        if train_iter % 10000 == 0:
+            trained_score = higgins_metric(datasource.simulator, true_latent_dim, encoder, latent_dim)
+            higgins_scores.append(trained_score)
+            print('Higgins metric before training: {}'.format(higgins_scores[0]))
+            print('Higgins metric after training {} iters: {}'.format(train_iter, higgins_scores[-1]))
+            print('Best Higgins: {}'.format(max(higgins_scores)))
+            ts.collect('Higgins Metric', trained_score)
     print(ts)
     print('Finished')
 
