@@ -22,23 +22,30 @@ datasource = import_module(sys.argv[1])
 
 
 class Transition(nn.Module):
-    def __init__(self, latent_size, num_actions):
+    def __init__(self, latent_size, num_actions, k=64):
         super().__init__()
         # Input: State + Action
         # Output: State
-        self.fc1 = nn.Linear(latent_size + num_actions, 16)
-        self.fc2 = nn.Linear(16, latent_size)
+        self.latent_size = latent_size
+        self.k = k
+        self.input_dim = latent_size + num_actions
+        self.to_categorical = SelfOrganizingBucket(latent_size, k)
+        self.fc1 = nn.Linear(num_actions + self.latent_size*k, 256)
+        self.fc2 = nn.Linear(256, latent_size * k)
+        self.to_dense = nn.Linear(latent_size*k, latent_size)
         self.cuda()
 
     def forward(self, z, actions):
-        x = torch.cat([z, actions], dim=1)
+        expanded = self.to_categorical(z)
+        expanded = expanded.view(-1, self.latent_size*self.k)
+        x = torch.cat([expanded, actions], dim=1)
         x = self.fc1(x)
         x = F.leaky_relu(x, 0.2)
         x = self.fc2(x)
-
-        # Fern hack: Predict a delta/displacement
-        x = x + z
-        x = norm(x)
+        x = x.view(len(z), self.latent_size, self.k)
+        x = torch.softmax(x, dim=2)
+        x = x.view(len(z), self.latent_size*self.k)
+        x = self.to_dense(x)
         return x
 
 
@@ -82,7 +89,7 @@ class Encoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.fc3(x)
-        x = norm(x)
+        #x = norm(x)
         return x
 
 
@@ -258,7 +265,7 @@ def imq_kernel(X: torch.Tensor,
 def mmd_normal_penalty(z, sigma=1.0):
     batch_size, latent_dim = z.shape
     z_fake = torch.randn(batch_size, latent_dim).cuda() * sigma
-    z_fake = norm(z_fake)
+    #z_fake = norm(z_fake)
     mmd_loss = -imq_kernel(z, z_fake, h_dim=latent_dim)
     return mmd_loss.mean()
 
