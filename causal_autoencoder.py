@@ -1,3 +1,4 @@
+import time
 import os
 import sys
 if len(sys.argv) < 2:
@@ -397,11 +398,14 @@ def visualize_latent_space(ground_truth, encoder, decoder, latent_dim, train_ite
 
 
 def simulate_future(datasource, encoder, decoder, transition, train_iter=0, timesteps=60, num_actions=4):
+    start_time = time.time()
+    print('Starting trajectory simulation for {} frames'.format(timesteps))
     states, rewards, dones, actions = datasource.get_trajectories(batch_size=4, timesteps=timesteps)
     states = torch.Tensor(states).unsqueeze(2).cuda()
     vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:, 0])
     for t in range(timesteps):
+        print('Simulating frame {}...'.format(t))
         x_t = torch.sigmoid(decoder(z))
         img = torch.cat((states[:, t], x_t), dim=3)
         caption = 'Pred. t+{} a={}'.format(t, actions[:, t])
@@ -410,6 +414,8 @@ def simulate_future(datasource, encoder, decoder, transition, train_iter=0, time
         onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
         z = transition(z, onehot_a)
     vid.finish()
+    print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
+
 
 if __name__ == '__main__':
     main()
