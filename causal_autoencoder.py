@@ -340,7 +340,7 @@ def main():
         transition.eval()
 
         # Periodically generate latent space traversals
-        if train_iter and train_iter % 1000 == 0:
+        if train_iter % 1000 == 0:
             # Image of reconstruction
             filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
             ground_truth = states[:, 0]
@@ -350,35 +350,24 @@ def main():
             imutil.show(img, filename=filename, caption=caption, img_padding=4, font_size=10)
 
             # Video of latent space traversal
-            vid = imutil.Video('latent_traversal_dims_{:04d}_iter_{:06d}'.format(latent_dim, train_iter))
-            # Create a "batch" containing copies of the same image, one per latent dimension
+            ground_truth = states[:, 0]
             for i in range(1, latent_dim):
                 ground_truth[i] = ground_truth[0]
-            zt = encoder(ground_truth[:latent_dim])
-            minval, maxval = decoder.to_categorical.particles.min(), decoder.to_categorical.particles.max()
-            frames = 120
-            for frame_idx in range(frames):
-                for z_idx in range(latent_dim):
-                    z_val = (frame_idx / frames) * (maxval - minval) + minval
-                    zt[z_idx, z_idx] = z_val
-                output = torch.sigmoid(decoder(norm(zt)))
-                caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
-                vid.write_frame(output, resize_to=(800,800), caption=caption, img_padding=8)
-            vid.finish()
+            visualize_latent_space(ground_truth, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
 
         # Periodically save the network
-        if train_iter and train_iter % 2000 == 0:
+        if train_iter % 2000 == 0:
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
             torch.save(decoder.state_dict(), 'model-decoder.pth')
 
         # Periodically generate simulations of the future
-        if train_iter and train_iter % 2000 == 0:
+        if train_iter % 2000 == 0:
             simulate_future(ground_truth[:4], onehot_a[:4], encoder, decoder, transition, train_iter)
 
         # Periodically compute the Higgins score
-        if train_iter and train_iter % 10000 == 0:
+        if train_iter % 10000 == 0:
             if not hasattr(datasource, 'simulator'):
                 print('Datasource {} does not support direct simulation, skipping disentanglement metrics'.format(datasource.__name__))
             else:
@@ -392,15 +381,30 @@ def main():
     print('Finished')
 
 
+def visualize_latent_space(ground_truth, encoder, decoder, latent_dim, train_iter=0, frames=120, img_size=800):
+    vid = imutil.Video('latent_traversal_dims_{:04d}_iter_{:06d}'.format(latent_dim, train_iter))
+    # Create a "batch" containing copies of the same image, one per latent dimension
+    zt = encoder(ground_truth[:latent_dim])
+    minval, maxval = decoder.to_categorical.particles.min(), decoder.to_categorical.particles.max()
+    for frame_idx in range(frames):
+        for z_idx in range(latent_dim):
+            z_val = (frame_idx / frames) * (maxval - minval) + minval
+            zt[z_idx, z_idx] = z_val
+        output = torch.sigmoid(decoder(norm(zt)))
+        caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
+        vid.write_frame(output, resize_to=(img_size,img_size), caption=caption, img_padding=8)
+    vid.finish()
+
+
 def simulate_future(x, actions, encoder, decoder, transition, train_iter=0):
-    vid = imutil.Video('simulation_iter_{:06d}.jpg'.format(train_iter), framerate=3)
+    vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(x)
     for t in range(60):
         x_t = torch.sigmoid(decoder(z))
-        img = torch.cat((x[:4], x_t[:4]), dim=3)
+        img = torch.cat((x, x_t), dim=3)
         caption = 'Pred. t+{} a={}'.format(t, torch.argmax(actions[:4], dim=1).cpu().numpy())
         vid.write_frame(img, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
-        # Change actions every few frames
+        # Rotate actions every few frames
         if t % 5 == 0:
             actions = torch.cat((actions[-1:], actions[:-1]))
         z = transition(z, actions)
