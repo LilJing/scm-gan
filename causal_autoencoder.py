@@ -1,3 +1,4 @@
+import os
 import sys
 if len(sys.argv) < 2:
     print('Usage: {} datasource'.format(sys.argv[0]))
@@ -282,18 +283,26 @@ def main():
     batch_size = 64
     latent_dim = 10
     true_latent_dim = 4
+    timesteps = 4
     num_actions = 4
     encoder = Encoder(latent_dim)
     decoder = Decoder(latent_dim)
     transition = Transition(latent_dim, num_actions)
     higgins_scores = []
 
+    #load_from_dir = '/mnt/nfs/experiments/scm-gan_17fe5849'
+    load_from_dir = None
+    if load_from_dir is not None:
+        encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
+        decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-decoder.pth')))
+        transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
+
     # Train the autoencoder
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
-    train_iters = 50 * 1000
-    ts = TimeSeries('Training Autoencoder', train_iters)
+    train_iters = 100 * 1000
+    ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(train_iters + 1):
         encoder.train()
         decoder.train()
@@ -303,7 +312,24 @@ def main():
         opt_dec.zero_grad()
         opt_trans.zero_grad()
 
-        images, actions, images_tplusone = datasource.get_batch()
+        states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
+        states = torch.Tensor(states).unsqueeze(2).cuda()
+        # states.shape: (batch_size, timesteps, 1, 64, 64)
+
+        # Predict the output of the game
+        loss = 0
+        z = encoder(states[:, 0])
+        for t in range(timesteps):
+            pred_logits = decoder(z)
+            bce_loss = F.binary_cross_entropy_with_logits(pred_logits, states[:, t])
+            ts.collect('Recon. t={}'.format(t), bce_loss)
+            loss += bce_loss
+            # Predict the next latent point
+            onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
+            z = transition(z, onehot_a)
+        loss.backward()
+
+        """
         x = torch.Tensor(images).cuda().unsqueeze(1)
         a_t = torch.Tensor(actions).cuda()
         x_tplusone = torch.Tensor(images_tplusone).cuda().unsqueeze(1)
@@ -321,6 +347,7 @@ def main():
         #prediction_loss = torch.sum((predicted - x_tplusone) ** 2)
         prediction_loss = F.binary_cross_entropy_with_logits(predicted_logits, x_tplusone)
         ts.collect('Prediction loss', prediction_loss)
+        """
 
         """
         mmd_loss = 0
@@ -331,8 +358,6 @@ def main():
         ts.collect('MMD Loss', mmd_loss)
         """
 
-        loss = prediction_loss + recon_loss #+ mmd_loss
-        loss.backward()
         opt_enc.step()
         opt_dec.step()
         opt_trans.step()
@@ -342,6 +367,7 @@ def main():
         decoder.eval()
         transition.eval()
 
+        # Periodically generate latent space traversals
         if train_iter and train_iter % 1000 == 0:
             filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
             img = torch.cat((x[:4], reconstructed[:4]), dim=3)
@@ -367,26 +393,34 @@ def main():
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
             torch.save(decoder.state_dict(), 'model-decoder.pth')
-        if train_iter % 2000 == 0:
+
+        # Periodically generate simulations of the future
+        if train_iter and train_iter % 2000 == 0:
             vid = imutil.VideoMaker('simulation_iter_{:06d}.jpg'.format(train_iter))
             zt = z.clone()[:4]
-            a_t = a_t[:4]
+            a_t = a_t.clone()[:4]
             for frame in range(60):
                 predicted = torch.sigmoid(decoder(zt))
                 img = torch.cat((x[:4], predicted[:4]), dim=3)
                 caption = 'Pred. t+{} a={}'.format(frame, torch.argmax(a_t[:4], dim=1).cpu().numpy())
                 vid.write_frame(img, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
-                z = transition(zt, a_t)
-                a_t = torch.cat((a_t[-1:], a_t[:-1]))
+                zt = transition(zt, a_t)
+                # Repeat each action 5x
+                if frame % 5 == 0:
+                    a_t = torch.cat((a_t[-1:], a_t[:-1]))
             vid.finish()
+
         # Periodically compute the Higgins score
-        if train_iter % 10000 == 0:
-            trained_score = higgins_metric(datasource.simulator, true_latent_dim, encoder, latent_dim)
-            higgins_scores.append(trained_score)
-            print('Higgins metric before training: {}'.format(higgins_scores[0]))
-            print('Higgins metric after training {} iters: {}'.format(train_iter, higgins_scores[-1]))
-            print('Best Higgins: {}'.format(max(higgins_scores)))
-            ts.collect('Higgins Metric', trained_score)
+        if train_iter and train_iter % 10000 == 0:
+            if not hasattr(datasource, 'simulator'):
+                print('Datasource {} does not support direct simulation, skipping disentanglement metrics'.format(datasource.__name__))
+            else:
+                trained_score = higgins_metric(datasource.simulator, true_latent_dim, encoder, latent_dim)
+                higgins_scores.append(trained_score)
+                print('Higgins metric before training: {}'.format(higgins_scores[0]))
+                print('Higgins metric after training {} iters: {}'.format(train_iter, higgins_scores[-1]))
+                print('Best Higgins: {}'.format(max(higgins_scores)))
+                ts.collect('Higgins Metric', trained_score)
     print(ts)
     print('Finished')
 

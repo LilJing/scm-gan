@@ -17,7 +17,7 @@ class MultiEnvironment():
         self.batch_size = len(envs)
         self.envs = envs
         self.reset()
-        print('Initialized {} environments in {:.03f}s'.format(self.batch_size, time.time() - start_time))
+        #print('Initialized {} environments in {:.03f}s'.format(self.batch_size, time.time() - start_time))
 
     def reset(self):
         map_fn(lambda x: reset_env(x), self.envs)
@@ -33,13 +33,13 @@ class MultiEnvironment():
             return state, reward, done, info
 
         results = map_fn(run_one_step, self.envs, actions)
-        #print('Ran {} environments one step in {:.03f}s'.format(self.batch_size, time.time() - start_time))
         states, rewards, dones, infos = zip(*results)
+        #print('Ran {} environments one step in {:.03f}s'.format(self.batch_size, time.time() - start_time))
         return states, rewards, dones, infos
 
     # Pass-through for eg. env.action_space, env.observation_space
     def __getattr__(self, name):
-        return getattr(self.envs[0].unwrapped, name)
+        return getattr(self.envs[0], name)
 
 
 def reset_env(env):
