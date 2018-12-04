@@ -364,7 +364,7 @@ def main():
 
         # Periodically generate simulations of the future
         if train_iter % 2000 == 0:
-            simulate_future(ground_truth[:4], onehot_a[:4], encoder, decoder, transition, train_iter)
+            simulate_future(datasource, encoder, decoder, transition, train_iter)
 
         # Periodically compute the Higgins score
         if train_iter % 10000 == 0:
@@ -396,18 +396,19 @@ def visualize_latent_space(ground_truth, encoder, decoder, latent_dim, train_ite
     vid.finish()
 
 
-def simulate_future(x, actions, encoder, decoder, transition, train_iter=0):
+def simulate_future(datasource, encoder, decoder, transition, train_iter=0, timesteps=60, num_actions=4):
+    states, rewards, dones, actions = datasource.get_trajectories(batch_size=4, timesteps=timesteps)
+    states = torch.Tensor(states).unsqueeze(2).cuda()
     vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
-    z = encoder(x)
-    for t in range(60):
+    z = encoder(states[:, 0])
+    for t in range(timesteps):
         x_t = torch.sigmoid(decoder(z))
-        img = torch.cat((x, x_t), dim=3)
-        caption = 'Pred. t+{} a={}'.format(t, torch.argmax(actions[:4], dim=1).cpu().numpy())
+        img = torch.cat((states[:, t], x_t), dim=3)
+        caption = 'Pred. t+{} a={}'.format(t, actions[:, t])
         vid.write_frame(img, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
-        # Rotate actions every few frames
-        if t % 5 == 0:
-            actions = torch.cat((actions[-1:], actions[:-1]))
-        z = transition(z, actions)
+        # Predict the next latent point
+        onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
+        z = transition(z, onehot_a)
     vid.finish()
 
 if __name__ == '__main__':
