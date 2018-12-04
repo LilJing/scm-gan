@@ -278,8 +278,6 @@ def norm(x):
 
 
 def main():
-    datasource.init()
-
     batch_size = 64
     latent_dim = 10
     true_latent_dim = 4
@@ -328,26 +326,6 @@ def main():
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             z = transition(z, onehot_a)
         loss.backward()
-
-        """
-        x = torch.Tensor(images).cuda().unsqueeze(1)
-        a_t = torch.Tensor(actions).cuda()
-        x_tplusone = torch.Tensor(images_tplusone).cuda().unsqueeze(1)
-        z = encoder(x)
-        reconstructed_logits = decoder(z)
-        reconstructed = torch.sigmoid(reconstructed_logits)
-
-        #recon_loss = torch.sum((x - reconstructed) ** 2)
-        recon_loss = F.binary_cross_entropy_with_logits(reconstructed_logits, x)
-        ts.collect('Reconstruction loss', recon_loss)
-
-        z_tplusone = transition(z, a_t)
-        predicted_logits = decoder(z_tplusone)
-        predicted = torch.sigmoid(predicted_logits)
-        #prediction_loss = torch.sum((predicted - x_tplusone) ** 2)
-        prediction_loss = F.binary_cross_entropy_with_logits(predicted_logits, x_tplusone)
-        ts.collect('Prediction loss', prediction_loss)
-        """
 
         """
         mmd_loss = 0
