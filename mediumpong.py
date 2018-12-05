@@ -117,11 +117,15 @@ def simulator(factor_batch):
     return np.array(images)
 
 
-def get_trajectories(batch_size=32, timesteps=10, policy=None):
+def get_trajectories(batch_size=32, timesteps=10, policy='random'):
     envs = MultiEnvironment([MinipongEnv() for _ in range(batch_size)])
     t_states, t_rewards, t_dones, t_actions = [], [], [], []
     for t in range(timesteps):
-        actions = np.random.randint(envs.action_space.n, size=(batch_size,))
+        if policy == 'random':
+            actions = np.random.randint(envs.action_space.n, size=(batch_size,))
+        if policy == 'repeat':
+            actions = [i % envs.action_space.n for i in range(batch_size)]
+
         states, rewards, dones, _ = envs.step(actions)
         t_states.append(states)
         t_rewards.append(rewards)

@@ -121,7 +121,7 @@ class Decoder(nn.Module):
         for i in range(self.latent_size):
             places[:, i] = torch.einsum('ij,ik->ijk', [x[:,i], x[:,i-1]])
 
-        x = places * self.k
+        x = places / places.max()
 
         # Given places, make some things
         x = self.conv1(x)
@@ -245,7 +245,7 @@ def main():
     transition = Transition(latent_dim, num_actions)
     higgins_scores = []
 
-    #load_from_dir = '/mnt/nfs/experiments/scm-gan_17fe5849'
+    #load_from_dir = '/mnt/nfs/experiments/scm-gan_5a7bb3de'
     load_from_dir = None
     if load_from_dir is not None:
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -256,7 +256,7 @@ def main():
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
-    train_iters = 50 * 1000
+    train_iters = 10 * 1000
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(train_iters + 1):
         encoder.train()
@@ -276,9 +276,10 @@ def main():
         z = encoder(states[:, 0])
         for t in range(timesteps):
             pred_logits = decoder(z)
-            bce_loss = F.binary_cross_entropy_with_logits(pred_logits, states[:, t])
-            ts.collect('Recon. t={}'.format(t), bce_loss)
-            loss += bce_loss
+            rec_loss = F.binary_cross_entropy_with_logits(-pred_logits, 1 - states[:, t])
+            #rec_loss = torch.mean((states[:, t] - torch.sigmoid(pred_logits))**2)
+            ts.collect('Recon. t={}'.format(t), rec_loss)
+            loss += rec_loss
             # Predict the next latent point
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             z = transition(z, onehot_a)
@@ -297,7 +298,7 @@ def main():
         transition.eval()
 
         # Periodically generate latent space traversals
-        if train_iter % 1000 == 0:
+        if train_iter and train_iter % 1000 == 0:
             # Image of reconstruction
             filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
             ground_truth = states[:, 0]
@@ -313,18 +314,18 @@ def main():
             visualize_latent_space(ground_truth, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
 
         # Periodically save the network
-        if train_iter % 2000 == 0:
+        if train_iter and train_iter % 2000 == 0:
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
             torch.save(decoder.state_dict(), 'model-decoder.pth')
 
         # Periodically generate simulations of the future
-        if train_iter % 2000 == 0:
+        if train_iter and train_iter % 2000 == 0:
             simulate_future(datasource, encoder, decoder, transition, train_iter)
 
         # Periodically compute the Higgins score
-        if train_iter % 10000 == 0:
+        if train_iter and train_iter % 10000 == 0:
             if not hasattr(datasource, 'simulator'):
                 print('Datasource {} does not support direct simulation, skipping disentanglement metrics'.format(datasource.__name__))
             else:
@@ -361,7 +362,6 @@ def simulate_future(datasource, encoder, decoder, transition, train_iter=0, time
     vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:, 0])
     for t in range(timesteps):
-        print('Simulating frame {}...'.format(t))
         x_t = torch.sigmoid(decoder(z))
         img = torch.cat((states[:, t], x_t), dim=3)
         caption = 'Pred. t+{} a={}'.format(t, actions[:, t])
