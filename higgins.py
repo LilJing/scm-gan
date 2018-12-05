@@ -43,8 +43,12 @@ def higgins_metric(simulator, true_latent_dim, encoder, encoded_latent_dim,
             images_right = simulator(random_factors[:,1,:])
 
             # Now encode each pair and take their difference
-            x_left = torch.FloatTensor(images_left).unsqueeze(1).cuda()
-            x_right = torch.FloatTensor(images_right).unsqueeze(1).cuda()
+            x_left = torch.FloatTensor(images_left).cuda()
+            if len(x_left.shape) < 4:
+                x_left = x_left.unsqueeze(1)
+            x_right = torch.FloatTensor(images_right).cuda()
+            if len(x_right.shape) < 4:
+                x_right = x_right.unsqueeze(1)
             encoded_left = encoder(x_left)[0].data.cpu().numpy()
             encoded_right = encoder(x_right)[0].data.cpu().numpy()
             z_diff = np.abs(encoded_left - encoded_right)
