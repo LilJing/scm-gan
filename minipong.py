@@ -49,7 +49,7 @@ class MinipongEnv():
 
 
 def build_state(left_y, right_y, ball_x, ball_y):
-    state = np.zeros((GAME_SIZE, GAME_SIZE))
+    state = np.zeros((3, GAME_SIZE, GAME_SIZE))
     paddle_width = 1
     paddle_height = 4
     ball_size = 2
@@ -61,11 +61,11 @@ def build_state(left_y, right_y, ball_x, ball_y):
     ball_x = np.clip(ball_x, paddle_height, GAME_SIZE - paddle_height)
     ball_y = np.clip(ball_y, paddle_height, GAME_SIZE - paddle_height)
 
-    state[left_y - paddle_height:left_y + paddle_height,
+    state[:, left_y - paddle_height:left_y + paddle_height,
                left_x - paddle_width: left_x + paddle_width] = 1.0
-    state[right_y - paddle_height:right_y + paddle_height,
+    state[:, right_y - paddle_height:right_y + paddle_height,
                right_x - paddle_width: right_x + paddle_width] = 1.0
-    state[ball_y-ball_size:ball_y+ball_size,
+    state[:, ball_y-ball_size:ball_y+ball_size,
                ball_x-ball_size:ball_x+ball_size] = 1.0
     return state
 

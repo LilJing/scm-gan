@@ -276,7 +276,7 @@ def main():
         z = encoder(states[:, 0])
         for t in range(timesteps):
             pred_logits = decoder(z)
-            rec_loss = F.binary_cross_entropy_with_logits(-pred_logits, 1 - states[:, t])
+            rec_loss = F.binary_cross_entropy_with_logits(pred_logits, states[:, t])
             #rec_loss = torch.mean((states[:, t] - torch.sigmoid(pred_logits))**2)
             ts.collect('Recon. t={}'.format(t), rec_loss)
             loss += rec_loss
