@@ -20,7 +20,7 @@ from spatial_recurrent import CSRN
 from higgins import higgins_metric
 
 from importlib import import_module
-datasource = import_module(sys.argv[1])
+datasource = import_module('envs.' + sys.argv[1])
 
 
 class Transition(nn.Module):
@@ -170,12 +170,12 @@ class SelfOrganizingBucket(nn.Module):
         # kern = torch.exp(-distances)
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
+        #return probs
         # Thermometer encoding
-        #therm = probs.clone()
-        #for i in range(1, self.k):
-        #    therm[:, :, i] = torch.max(probs[:, :, i], therm[:, :, i - 1].clone())
-        #return 1 - therm
-        return probs
+        therm = probs.clone()
+        for i in range(1, self.k):
+            therm[:, :, i] = torch.max(probs[:, :, i], therm[:, :, i - 1].clone())
+        return 1 - therm
 
 
 # Inverse multiquadratic kernel with varying kernel bandwidth
