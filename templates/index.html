@@ -1,0 +1,63 @@
+<html>
+<body>
+    <canvas id='displaycanvas'></canvas>
+    <br>
+</body>
+<script>
+var num_actions = {{num_actions}};
+
+window.onload = function() {
+    load_screenshot();
+    for (var i = 0; i < num_actions; i++) {
+        var button = document.createElement('button');
+        button.innerHTML = 'Action ' + i;
+        addButtonAction(button, i);
+
+        var body = document.getElementsByTagName('body')[0]
+        body.appendChild(button);
+    }
+}
+
+function load_screenshot() {
+    var c = document.getElementById('displaycanvas');
+    var ctx = c.getContext('2d');
+
+    var img = new Image();
+    img.src = '/static/screenshot.jpg#' + new Date().getTime();
+    img.onload = function() {
+        c.width = img.width;
+        c.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        console.log('drawing image ' + img.src);
+    }
+}
+
+function addButtonAction(button, idx) {
+    button.addEventListener('click', function() {
+        postData(`/step`, {action: idx})
+            .then(function(response) {
+                console.log('response ' + response.text());
+                load_screenshot();
+            }).catch(error => console.error(error));
+    });
+}
+
+function postData(url = ``, data = {}) {
+  // Default options are marked with *
+    return fetch(url, {
+        method: "POST", // *GET, POST, PUT, DELETE, etc.
+        //mode: "cors", // no-cors, cors, *same-origin
+        cache: "no-cache", // *default, no-cache, reload, force-cache, only-if-cached
+        credentials: "same-origin", // include, *same-origin, omit
+        headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            // "Content-Type": "application/x-www-form-urlencoded",
+        },
+        redirect: "follow", // manual, *follow, error
+        referrer: "no-referrer", // no-referrer, *client
+        body: JSON.stringify(data), // body data type must match "Content-Type" header
+    });
+    //.then(response => response.json()); // parses response to JSON
+}
+</script>
+</html>
