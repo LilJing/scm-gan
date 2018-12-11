@@ -3,7 +3,7 @@ import os
 import sys
 if len(sys.argv) < 2:
     print('Usage: {} datasource'.format(sys.argv[0]))
-    print('\tdatasource: boxes/minipong/...')
+    print('\tAvailable datasources: boxes, minipong, mediumpong...')
     exit(1)
 
 import numpy as np
@@ -111,6 +111,7 @@ class Decoder(nn.Module):
         self.conv4 = nn.ConvTranspose2d(32, 3, 4, stride=2, padding=1)
 
         self.to_categorical = SelfOrganizingBucket(z=latent_size, k=k)
+        self.bn_places = nn.BatchNorm2d(latent_size)
         self.cuda()
 
     def forward(self, x):
@@ -121,7 +122,8 @@ class Decoder(nn.Module):
         for i in range(self.latent_size):
             places[:, i] = torch.einsum('ij,ik->ijk', [x[:,i], x[:,i-1]])
 
-        x = places / places.max()
+        x = F.softmax(places, dim=1)
+        x = self.bn_places(x)
 
         # Given places, make some things
         x = self.conv1(x)
@@ -157,7 +159,7 @@ class SelfOrganizingBucket(nn.Module):
         #self.particles = rho
         self.cuda()
 
-    def forward(self, x):
+    def forward(self, x, thermometer=False):
         # x is a real-valued tensor size (batch, Z)
         batch_size = len(x)
         # Broadcast x to (batch, Z, K)
@@ -170,12 +172,12 @@ class SelfOrganizingBucket(nn.Module):
         # kern = torch.exp(-distances)
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
-        #return probs
-        # Thermometer encoding
-        therm = probs.clone()
-        for i in range(1, self.k):
-            therm[:, :, i] = torch.max(probs[:, :, i], therm[:, :, i - 1].clone())
-        return 1 - therm
+        if thermometer:
+            therm = probs.clone()
+            for i in range(1, self.k):
+                therm[:, :, i] = torch.max(probs[:, :, i], therm[:, :, i - 1].clone())
+            probs = 1 - therm
+        return probs
 
 
 # Inverse multiquadratic kernel with varying kernel bandwidth
@@ -236,7 +238,7 @@ def norm(x):
 
 def main():
     batch_size = 64
-    latent_dim = 10
+    latent_dim = 12
     true_latent_dim = 4
     timesteps = 4
     num_actions = 4
@@ -245,7 +247,7 @@ def main():
     transition = Transition(latent_dim, num_actions)
     higgins_scores = []
 
-    #load_from_dir = '/mnt/nfs/experiments/scm-gan_5a7bb3de'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_06a94339'
     load_from_dir = None
     if load_from_dir is not None:
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -256,7 +258,7 @@ def main():
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
-    train_iters = 10 * 1000
+    train_iters = 100 * 1000
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(train_iters + 1):
         encoder.train()
@@ -276,8 +278,8 @@ def main():
         z = encoder(states[:, 0])
         for t in range(timesteps):
             pred_logits = decoder(z)
-            rec_loss = F.binary_cross_entropy_with_logits(pred_logits, states[:, t])
-            #rec_loss = torch.mean((states[:, t] - torch.sigmoid(pred_logits))**2)
+            #rec_loss = F.binary_cross_entropy_with_logits(pred_logits, states[:, t])
+            rec_loss = torch.mean((states[:, t] - torch.sigmoid(pred_logits))**2)
             ts.collect('Recon. t={}'.format(t), rec_loss)
             loss += rec_loss
             # Predict the next latent point

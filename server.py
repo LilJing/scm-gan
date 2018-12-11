@@ -3,8 +3,11 @@ import imutil
 import gym
 
 app = flask.Flask(__name__)
-env = gym.make('Breakout-v0')
-env.reset()
+
+def reset_game(name='Breakout-v0'):
+    env = gym.make(name)
+    state = env.reset()
+    imutil.show(state, filename='static/screenshot.jpg')
 
 @app.route('/')
 def route_index():
