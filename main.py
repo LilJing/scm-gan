@@ -1,4 +1,5 @@
 import time
+import math
 import os
 import sys
 if len(sys.argv) < 2:
@@ -149,7 +150,7 @@ class Decoder(nn.Module):
 
         if visualize:
             cap = 'Things+Places Map'
-            imutil.show(x[0], filename='things_in_places.jpg', caption=cap)
+            imutil.show(x[0], filename='visual_conv0.png', resize_to=(256,256), caption=cap)
 
         # Draw things in places
         x = self.conv1(x)
@@ -157,7 +158,7 @@ class Decoder(nn.Module):
         x = F.leaky_relu(x, 0.2)
         if visualize:
             cap = 'After conv1'
-            imutil.show(x[0], filename='conv1.jpg', caption=cap)
+            imutil.show(x[0], filename='visual_conv1.png', resize_to=(256,256), caption=cap)
 
         #x = self.conv2(x)
         #x = self.bn_conv2(x)
@@ -167,7 +168,7 @@ class Decoder(nn.Module):
         x = self.conv4(x)
         if visualize:
             cap = 'After conv4'
-            imutil.show(x[0], filename='decoder_output.jpg', caption=cap)
+            imutil.show(x[0], filename='visual_conv4.png', resize_to=(256,256), caption=cap)
         return x
 
 
@@ -219,6 +220,72 @@ class SelfOrganizingBucket(nn.Module):
                 therm[:, :, i] = torch.max(probs[:, :, i], therm[:, :, i - 1].clone())
             probs = 1 - therm
         return probs
+
+
+# https://discuss.pytorch.org/t/is-there-anyway-to-do-gaussian-filtering-for-an-image-2d-3d-in-pytorch/12351/8
+class GaussianSmoothing(nn.Module):
+    """
+    Apply gaussian smoothing on a
+    1d, 2d or 3d tensor. Filtering is performed seperately for each channel
+    in the input using a depthwise convolution.
+    Arguments:
+        channels (int, sequence): Number of channels of the input tensors. Output will
+            have this number of channels as well.
+        kernel_size (int, sequence): Size of the gaussian kernel.
+        sigma (float, sequence): Standard deviation of the gaussian kernel.
+        dim (int, optional): The number of dimensions of the data.
+            Default value is 2 (spatial).
+    """
+    def __init__(self, channels, kernel_size, sigma, dim=2):
+        super(GaussianSmoothing, self).__init__()
+        kernel_size = [kernel_size] * dim
+        sigma = [sigma] * dim
+
+        # The gaussian kernel is the product of the
+        # gaussian function of each dimension.
+        kernel = 1
+        meshgrids = torch.meshgrid(
+            [
+                torch.arange(size, dtype=torch.float32)
+                for size in kernel_size
+            ]
+        )
+        for size, std, mgrid in zip(kernel_size, sigma, meshgrids):
+            mean = (size - 1) / 2
+            kernel *= 1 / (std * math.sqrt(2 * math.pi)) * \
+                      torch.exp(-((mgrid - mean) / (2 * std)) ** 2)
+
+        # Make sure sum of values in gaussian kernel equals 1.
+        kernel = kernel / torch.sum(kernel)
+
+        # Reshape to depthwise convolutional weight
+        kernel = kernel.view(1, 1, *kernel.size())
+        kernel = kernel.repeat(channels, *[1] * (kernel.dim() - 1))
+
+        self.register_buffer('weight', kernel)
+        self.groups = channels
+
+        if dim == 1:
+            self.conv = F.conv1d
+        elif dim == 2:
+            self.conv = F.conv2d
+        elif dim == 3:
+            self.conv = F.conv3d
+        else:
+            raise RuntimeError(
+                'Only 1, 2 and 3 dimensions are supported. Received {}.'.format(dim)
+            )
+        self.cuda()
+
+    def forward(self, input):
+        """
+        Apply gaussian filter to input.
+        Arguments:
+            input (torch.Tensor): Input to apply gaussian filter on.
+        Returns:
+            filtered (torch.Tensor): Filtered output.
+        """
+        return self.conv(input, weight=self.weight, groups=self.groups)
 
 
 # Inverse multiquadratic kernel with varying kernel bandwidth
@@ -287,6 +354,7 @@ def main():
     encoder = Encoder(latent_dim)
     decoder = Decoder(latent_dim)
     transition = Transition(latent_dim, num_actions)
+    blur = GaussianSmoothing(channels=3, kernel_size=12, sigma=4.)
     higgins_scores = []
 
     #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_06a94339'
@@ -319,8 +387,20 @@ def main():
         z = encoder(states[:, 0])
         for t in range(timesteps):
             pred_logits = decoder(z)
-            #rec_loss = F.binary_cross_entropy_with_logits(pred_logits, states[:, t])
-            rec_loss = torch.mean((states[:, t] - torch.sigmoid(pred_logits))**2)
+
+            expected = states[:, t]
+            actual = torch.sigmoid(pred_logits)
+            # MSE loss
+            rec_loss = torch.mean((expected - actual)**2)
+            # MSE loss but blurred to prevent pathological behavior
+            #rec_loss = torch.mean((blur(expected) - blur(actual))**2)
+
+            # MSE loss but weighted toward foreground pixels
+            error_mask = torch.mean((expected - actual) ** 2, dim=1)
+            foreground_mask = torch.mean(expected, dim=1)
+            error_mask = 0.05 * error_mask + 0.95 * (error_mask * foreground_mask)
+            rec_loss = torch.mean(error_mask)
+
             ts.collect('Recon. t={}'.format(t), rec_loss)
             loss += rec_loss
             # Predict the next latent point
@@ -340,7 +420,7 @@ def main():
         decoder.eval()
         transition.eval()
 
-        if train_iter % 200 == 0:
+        if train_iter % 100 == 0:
             visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
 
         # Periodically generate latent space traversals
@@ -375,7 +455,7 @@ def main():
 
 def visualize_reconstruction(encoder, decoder, states, train_iter=0):
     # Image of reconstruction
-    filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
+    filename = 'vis_iter_{:06d}.png'.format(train_iter)
     ground_truth = states[:, 0]
     reconstructed = torch.sigmoid(decoder(encoder(ground_truth, visualize=True), visualize=True))
     img = torch.cat((ground_truth[:4], reconstructed[:4]), dim=3)
