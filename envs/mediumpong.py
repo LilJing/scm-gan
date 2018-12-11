@@ -65,15 +65,17 @@ def build_state(left_y, right_y, ball_x, ball_y, ball_velocity):
     ball_x = np.clip(ball_x, paddle_height, GAME_SIZE - paddle_height)
     ball_y = np.clip(ball_y, paddle_height, GAME_SIZE - paddle_height)
 
-    state[:, left_y - paddle_height:left_y + paddle_height,
+    # Blue left red right
+    state[2, left_y - paddle_height:left_y + paddle_height,
                left_x - paddle_width: left_x + paddle_width] = 1
-    state[:, right_y - paddle_height:right_y + paddle_height,
+    state[0, right_y - paddle_height:right_y + paddle_height,
                right_x - paddle_width: right_x + paddle_width] = 1
 
+    # Ball is green-red or green-blue to indicate velocity
     if ball_velocity < 0:
-        ball_color = (1, .5, 0)
+        ball_color = (0, 1, .5)
     elif ball_velocity > 0:
-        ball_color = (0, .5, 1)
+        ball_color = (.5, 1, 0)
 
     for idx, c in enumerate(ball_color):
         state[idx, ball_y-ball_size:ball_y+ball_size,

@@ -72,7 +72,7 @@ class Encoder(nn.Module):
         # Bxlatent_size
         self.cuda()
 
-    def forward(self, x):
+    def forward(self, x, visualize=False):
         # Input: B x 1 x 64 x 64
         x = self.conv1(x)
         x = self.bn_conv1(x)
@@ -97,7 +97,7 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, latent_size, k=64, m=10):
+    def __init__(self, latent_size, k=64, m=3):
         super().__init__()
         self.latent_size = latent_size
         # K is the number of buckets to use when discretizing
@@ -121,39 +121,53 @@ class Decoder(nn.Module):
         self.things_fc2 = nn.Linear(128, latent_size*m)
         self.cuda()
 
-    def forward(self, x):
+    def forward(self, x, visualize=False):
         # The world consists of things in places.
 
         # Compute places as ring of outer products, one place per latent dim
         x_cat = self.to_categorical(x)
         places = torch.zeros((len(x_cat), self.latent_size, self.k, self.k)).cuda()
-        for i in range(self.latent_size):
-            places[:, i] = torch.einsum('ij,ik->ijk', [x_cat[:,i], x_cat[:,i-1]])
+        for i in range(0, self.latent_size, 2):
+            shifted = [x_cat[:,i], x_cat[:,i-1]]
+            places[:, i]   = torch.einsum('ij,ik->ijk', shifted)
+            places[:, i+1] = torch.einsum('ij,ik->ikj', shifted)
         places = places - places.min()
         places = places / places.max()
 
-        # Each place should be assigned one thing
+        # Each thing is in exactly one place at any given time
         things = self.things_fc1(x)
         things = self.things_bn1(things)
         things = F.leaky_relu(things, 0.2)
         things = self.things_fc2(things)
-        things = things.view(-1, self.latent_size, self.m)
-        things = F.softmax(things, dim=2)
+        things = things.view(-1, self.m, self.latent_size)
+        # (batch, number_of_things, number_of_places)
+        things = F.softmax(things, dim=1)
 
-        # Output a map of which things are in which place
-        things_in_places = torch.einsum('blwh,blc->blcwh', [places, things])
-        x = things_in_places.sum(dim=1)
+        things_in_places = torch.einsum('bpwh,btp->btpwh', [places, things])
+        x = things_in_places.sum(dim=2)
+        #x = F.softmax(x, dim=1)
 
-        # Given places, make some things
+        if visualize:
+            cap = 'Things+Places Map'
+            imutil.show(x[0], filename='things_in_places.jpg', caption=cap)
+
+        # Draw things in places
         x = self.conv1(x)
         x = self.bn_conv1(x)
         x = F.leaky_relu(x, 0.2)
-        x = self.conv2(x)
-        x = self.bn_conv2(x)
-        x = F.leaky_relu(x, 0.2)
-        x = self.conv3(x)
+        if visualize:
+            cap = 'After conv1'
+            imutil.show(x[0], filename='conv1.jpg', caption=cap)
+
+        #x = self.conv2(x)
+        #x = self.bn_conv2(x)
+        #x = F.leaky_relu(x, 0.2)
+        #x = self.conv3(x)
         x = F.leaky_relu(x, 0.2)
         x = self.conv4(x)
+        if visualize:
+            cap = 'After conv4'
+            imutil.show(x[0], filename='decoder_output.jpg', caption=cap)
         return x
 
 
@@ -169,17 +183,19 @@ class SelfOrganizingBucket(nn.Module):
         11111111111111
         11111111000000
     """
-    def __init__(self, z, k, kernel='inverse_multiquadratic'):
+    def __init__(self, z, k, kernel='gaussian'):
         super().__init__()
         self.z = z
         self.k = k
         self.kernel = kernel
         rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
         self.particles = torch.nn.Parameter(rho)
-        # eta = torch.ones(z).cuda()
-        #self.eta = torch.nn.Parameter(eta)
         # For fixed particle positions
         #self.particles = rho
+
+        # Sharpness/scale parameter
+        eta = torch.ones(self.z).cuda() * 30
+        self.eta = torch.nn.Parameter(eta)
         self.cuda()
 
     def forward(self, x, thermometer=False):
@@ -193,7 +209,8 @@ class SelfOrganizingBucket(nn.Module):
         if self.kernel == 'inverse_multiquadratic':
             kern = .01 / (.01 + distances)
         elif self.kernel == 'gaussian':
-            kern = torch.exp(-eta * distances)
+            dist_kern = torch.einsum('blk,l->blk', [distances, self.eta])
+            kern = torch.exp(-dist_kern)
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
         if thermometer:
@@ -323,9 +340,11 @@ def main():
         decoder.eval()
         transition.eval()
 
+        if train_iter % 200 == 0:
+            visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
+
         # Periodically generate latent space traversals
         if train_iter % 1000 == 0:
-            visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
             visualize_latent_space(states, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
 
         # Periodically save the network
@@ -358,7 +377,7 @@ def visualize_reconstruction(encoder, decoder, states, train_iter=0):
     # Image of reconstruction
     filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
     ground_truth = states[:, 0]
-    reconstructed = torch.sigmoid(decoder(encoder(ground_truth)))
+    reconstructed = torch.sigmoid(decoder(encoder(ground_truth, visualize=True), visualize=True))
     img = torch.cat((ground_truth[:4], reconstructed[:4]), dim=3)
     caption = 'D(E(x)) iter {}'.format(train_iter)
     imutil.show(img, filename=filename, caption=caption, img_padding=4, font_size=10)
