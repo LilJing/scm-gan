@@ -123,7 +123,7 @@ class Decoder(nn.Module):
             places[:, i] = torch.einsum('ij,ik->ijk', [x[:,i], x[:,i-1]])
 
         x = F.softmax(places, dim=1)
-        x = self.bn_places(x)
+        #x = self.bn_places(x)
 
         # Given places, make some things
         x = self.conv1(x)
@@ -242,6 +242,7 @@ def main():
     true_latent_dim = 4
     timesteps = 4
     num_actions = 4
+    train_iters = 100 * 1000
     encoder = Encoder(latent_dim)
     decoder = Decoder(latent_dim)
     transition = Transition(latent_dim, num_actions)
@@ -258,9 +259,8 @@ def main():
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
-    train_iters = 100 * 1000
     ts = TimeSeries('Training Model', train_iters)
-    for train_iter in range(train_iters + 1):
+    for train_iter in range(1, train_iters + 1):
         encoder.train()
         decoder.train()
         transition.train()
@@ -300,7 +300,7 @@ def main():
         transition.eval()
 
         # Periodically generate latent space traversals
-        if train_iter and train_iter % 1000 == 0:
+        if train_iter % 1000 == 0:
             # Image of reconstruction
             filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
             ground_truth = states[:, 0]
@@ -316,18 +316,18 @@ def main():
             visualize_latent_space(ground_truth, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
 
         # Periodically save the network
-        if train_iter and train_iter % 2000 == 0:
+        if train_iter % 2000 == 0:
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
             torch.save(decoder.state_dict(), 'model-decoder.pth')
 
         # Periodically generate simulations of the future
-        if train_iter and train_iter % 2000 == 0:
+        if train_iter % 2000 == 0:
             simulate_future(datasource, encoder, decoder, transition, train_iter)
 
         # Periodically compute the Higgins score
-        if train_iter and train_iter % 10000 == 0:
+        if train_iter % 10000 == 0:
             if not hasattr(datasource, 'simulator'):
                 print('Datasource {} does not support direct simulation, skipping disentanglement metrics'.format(datasource.__name__))
             else:
