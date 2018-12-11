@@ -97,12 +97,15 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, latent_size, k=64):
+    def __init__(self, latent_size, k=64, m=10):
         super().__init__()
         self.latent_size = latent_size
+        # K is the number of buckets to use when discretizing
         self.k = k
+        # M is the number of kinds of things that there can be
+        self.m = m
 
-        self.conv1 = nn.Conv2d(latent_size, 32, 4, stride=2, padding=1)
+        self.conv1 = nn.Conv2d(m, 32, 4, stride=2, padding=1)
         self.bn_conv1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 32, 4, stride=2, padding=1)
         self.bn_conv2 = nn.BatchNorm2d(32)
@@ -112,18 +115,34 @@ class Decoder(nn.Module):
 
         self.to_categorical = SelfOrganizingBucket(z=latent_size, k=k)
         self.bn_places = nn.BatchNorm2d(latent_size)
+
+        self.things_fc1 = nn.Linear(latent_size, 128)
+        self.things_bn1 = nn.BatchNorm1d(128)
+        self.things_fc2 = nn.Linear(128, latent_size*m)
         self.cuda()
 
     def forward(self, x):
         # The world consists of things in places.
-        x = self.to_categorical(x)
-        places = torch.zeros((len(x), self.latent_size, self.k, self.k)).cuda()
-        # Cycle of outer products
-        for i in range(self.latent_size):
-            places[:, i] = torch.einsum('ij,ik->ijk', [x[:,i], x[:,i-1]])
 
-        x = F.softmax(places, dim=1)
-        #x = self.bn_places(x)
+        # Compute places as ring of outer products, one place per latent dim
+        x_cat = self.to_categorical(x)
+        places = torch.zeros((len(x_cat), self.latent_size, self.k, self.k)).cuda()
+        for i in range(self.latent_size):
+            places[:, i] = torch.einsum('ij,ik->ijk', [x_cat[:,i], x_cat[:,i-1]])
+        places = places - places.min()
+        places = places / places.max()
+
+        # Each place should be assigned one thing
+        things = self.things_fc1(x)
+        things = self.things_bn1(things)
+        things = F.leaky_relu(things, 0.2)
+        things = self.things_fc2(things)
+        things = things.view(-1, self.latent_size, self.m)
+        things = F.softmax(things, dim=2)
+
+        # Output a map of which things are in which place
+        things_in_places = torch.einsum('blwh,blc->blcwh', [places, things])
+        x = things_in_places.sum(dim=1)
 
         # Given places, make some things
         x = self.conv1(x)
@@ -154,8 +173,12 @@ class SelfOrganizingBucket(nn.Module):
         super().__init__()
         self.z = z
         self.k = k
+        self.kernel = kernel
         rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
         self.particles = torch.nn.Parameter(rho)
+        # eta = torch.ones(z).cuda()
+        #self.eta = torch.nn.Parameter(eta)
+        # For fixed particle positions
         #self.particles = rho
         self.cuda()
 
@@ -167,9 +190,10 @@ class SelfOrganizingBucket(nn.Module):
         reference_locations = self.particles.unsqueeze(0).repeat(batch_size, 1, 1)
         distances = (perceived_locations - reference_locations) ** 2
         # IMQ kernel
-        kern = .01 / (.01 + distances)
-        # Gaussian RBF kernel
-        # kern = torch.exp(-distances)
+        if self.kernel == 'inverse_multiquadratic':
+            kern = .01 / (.01 + distances)
+        elif self.kernel == 'gaussian':
+            kern = torch.exp(-eta * distances)
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
         if thermometer:
@@ -301,19 +325,8 @@ def main():
 
         # Periodically generate latent space traversals
         if train_iter % 1000 == 0:
-            # Image of reconstruction
-            filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
-            ground_truth = states[:, 0]
-            reconstructed = torch.sigmoid(decoder(encoder(ground_truth)))
-            img = torch.cat((ground_truth[:4], reconstructed[:4]), dim=3)
-            caption = 'D(E(x)) iter {}'.format(train_iter)
-            imutil.show(img, filename=filename, caption=caption, img_padding=4, font_size=10)
-
-            # Video of latent space traversal
-            ground_truth = states[:, 0]
-            for i in range(1, latent_dim):
-                ground_truth[i] = ground_truth[0]
-            visualize_latent_space(ground_truth, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
+            visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
+            visualize_latent_space(states, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
 
         # Periodically save the network
         if train_iter % 2000 == 0:
@@ -324,7 +337,7 @@ def main():
 
         # Periodically generate simulations of the future
         if train_iter % 2000 == 0:
-            simulate_future(datasource, encoder, decoder, transition, train_iter)
+            visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter)
 
         # Periodically compute the Higgins score
         if train_iter % 10000 == 0:
@@ -341,11 +354,26 @@ def main():
     print('Finished')
 
 
-def visualize_latent_space(ground_truth, encoder, decoder, latent_dim, train_iter=0, frames=120, img_size=800):
-    vid = imutil.Video('latent_traversal_dims_{:04d}_iter_{:06d}'.format(latent_dim, train_iter))
+def visualize_reconstruction(encoder, decoder, states, train_iter=0):
+    # Image of reconstruction
+    filename = 'vis_iter_{:06d}.jpg'.format(train_iter)
+    ground_truth = states[:, 0]
+    reconstructed = torch.sigmoid(decoder(encoder(ground_truth)))
+    img = torch.cat((ground_truth[:4], reconstructed[:4]), dim=3)
+    caption = 'D(E(x)) iter {}'.format(train_iter)
+    imutil.show(img, filename=filename, caption=caption, img_padding=4, font_size=10)
+
+
+def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, frames=120, img_size=800):
     # Create a "batch" containing copies of the same image, one per latent dimension
+    ground_truth = states[:, 0]
+    for i in range(1, latent_dim):
+        ground_truth[i] = ground_truth[0]
     zt = encoder(ground_truth[:latent_dim])
     minval, maxval = decoder.to_categorical.particles.min(), decoder.to_categorical.particles.max()
+
+    # Generate L videos, one per latent dimension
+    vid = imutil.Video('latent_traversal_dims_{:04d}_iter_{:06d}'.format(latent_dim, train_iter))
     for frame_idx in range(frames):
         for z_idx in range(latent_dim):
             z_val = (frame_idx / frames) * (maxval - minval) + minval
@@ -356,7 +384,7 @@ def visualize_latent_space(ground_truth, encoder, decoder, latent_dim, train_ite
     vid.finish()
 
 
-def simulate_future(datasource, encoder, decoder, transition, train_iter=0, timesteps=60, num_actions=4):
+def visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter=0, timesteps=60, num_actions=4):
     start_time = time.time()
     print('Starting trajectory simulation for {} frames'.format(timesteps))
     states, rewards, dones, actions = datasource.get_trajectories(batch_size=4, timesteps=timesteps)
