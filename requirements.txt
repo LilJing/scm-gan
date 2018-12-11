@@ -1,7 +1,7 @@
-torch
+torch>=1.0
 numpy
 networkx
 matplotlib
-git+https://github.com/lwneal/imutil
+imutil
 git+https://github.com/lwneal/logutil
 
