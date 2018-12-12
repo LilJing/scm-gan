@@ -82,6 +82,13 @@ def build_state(left_y, right_y, ball_x, ball_y, ball_velocity):
     for idx, c in enumerate(ball_color):
         state[idx, ball_y-ball_size:ball_y+ball_size,
                    ball_x-ball_size:ball_x+ball_size] = c
+        # Add a little tail to indicate direction
+        if ball_velocity < 0:
+            state[idx, ball_y-1:ball_y+1,
+                       ball_x-ball_size:ball_x+ball_size+3] = c
+        else:
+            state[idx, ball_y-1:ball_y+1,
+                       ball_x-ball_size-3:ball_x+ball_size] = c
     return state
 
 
