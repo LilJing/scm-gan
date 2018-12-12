@@ -25,30 +25,20 @@ datasource = import_module('envs.' + sys.argv[1])
 
 
 class Transition(nn.Module):
-    def __init__(self, latent_size, num_actions, k=64):
+    def __init__(self, latent_size, num_actions):
         super().__init__()
         # Input: State + Action
         # Output: State
         self.latent_size = latent_size
-        self.k = k
-        self.input_dim = latent_size + num_actions
-        self.to_categorical = RealToCategorical(latent_size, k)
-        self.fc1 = nn.Linear(num_actions + self.latent_size*k, 256)
-        self.fc2 = nn.Linear(256, latent_size * k)
-        self.to_dense = nn.Linear(latent_size*k, latent_size)
+        self.fc1 = nn.Linear(num_actions + self.latent_size, 128)
+        self.fc2 = nn.Linear(128, latent_size)
         self.cuda()
 
-    def forward(self, z, actions, evaluation=False):
-        expanded = self.to_categorical(z)
-        expanded = expanded.view(-1, self.latent_size*self.k)
-        x = torch.cat([expanded, actions], dim=1)
+    def forward(self, z, actions):
+        x = torch.cat([z, actions], dim=1)
         x = self.fc1(x)
-        x = F.leaky_relu(x, 0.2)
+        x = F.relu(x)
         x = self.fc2(x)
-        x = x.view(len(z), self.latent_size, self.k)
-        x = torch.softmax(x, dim=2)
-        x = x.view(len(z), self.latent_size*self.k)
-        x = self.to_dense(x)
         return z + x
 
 
@@ -374,10 +364,10 @@ def norm(x):
 
 def main():
     batch_size = 64
-    latent_dim = 16
+    latent_dim = 32
     true_latent_dim = 4
     num_actions = 4
-    train_iters = 50 * 1000
+    train_iters = 500 * 1000
     encoder = Encoder(latent_dim)
     decoder = Decoder(latent_dim)
     transition = Transition(latent_dim, num_actions)
@@ -530,7 +520,7 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
         vid.write_frame(img, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
         # Predict the next latent point
         onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
-        z = transition(z, onehot_a, evaluation=True)
+        z = transition(z, onehot_a)
     vid.finish()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
