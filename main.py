@@ -106,7 +106,7 @@ class Decoder(nn.Module):
         # M is the number of kinds of things that there can be
         self.m = m
 
-        self.conv1 = nn.Conv2d(m, 32, 4, stride=2, padding=1)
+        self.conv1 = nn.Conv2d(latent_size, 32, 4, stride=2, padding=1)
         self.bn_conv1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 32, 4, stride=2, padding=1)
         self.bn_conv2 = nn.BatchNorm2d(32)
@@ -127,6 +127,8 @@ class Decoder(nn.Module):
 
         # Compute places as ring of outer products, one place per latent dim
         x_cat = self.to_categorical(x)
+        if visualize:
+            imutil.show(x_cat[0], resize_to=(640,240), caption="Latent Code", filename='visual_to_cat.png')
         places = torch.zeros((len(x_cat), self.latent_size, self.k, self.k)).cuda()
         for i in range(0, self.latent_size, 2):
             shifted = [x_cat[:,i], x_cat[:,i-1]]
@@ -135,7 +137,8 @@ class Decoder(nn.Module):
         places = places - places.min()
         places = places / places.max()
 
-        # Each thing is in exactly one place at any given time
+        """
+        # There are M things, and each thing is in exactly one place at any given time
         things = self.things_fc1(x)
         things = self.things_bn1(things)
         things = F.leaky_relu(things, 0.2)
@@ -146,12 +149,12 @@ class Decoder(nn.Module):
 
         things_in_places = torch.einsum('bpwh,btp->btpwh', [places, things])
         x = things_in_places.sum(dim=2)
-        #x = F.softmax(x, dim=1)
-
         if visualize:
             cap = 'Things+Places Map'
             imutil.show(x[0], filename='visual_conv0.png', resize_to=(256,256), caption=cap)
+        """
 
+        x = places
         # Draw things in places
         x = self.conv1(x)
         x = self.bn_conv1(x)
@@ -190,9 +193,9 @@ class SelfOrganizingBucket(nn.Module):
         self.k = k
         self.kernel = kernel
         rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
-        self.particles = torch.nn.Parameter(rho)
+        #self.particles = torch.nn.Parameter(rho)
         # For fixed particle positions
-        #self.particles = rho
+        self.particles = rho
 
         # Sharpness/scale parameter
         eta = torch.ones(self.z).cuda() * 30
@@ -238,6 +241,7 @@ class GaussianSmoothing(nn.Module):
     """
     def __init__(self, channels, kernel_size, sigma, dim=2):
         super(GaussianSmoothing, self).__init__()
+        self.padding = [int(kernel_size / 2)] * dim
         kernel_size = [kernel_size] * dim
         sigma = [sigma] * dim
 
@@ -285,7 +289,7 @@ class GaussianSmoothing(nn.Module):
         Returns:
             filtered (torch.Tensor): Filtered output.
         """
-        return self.conv(input, weight=self.weight, groups=self.groups)
+        return self.conv(input, weight=self.weight, groups=self.groups, padding=self.padding)
 
 
 # Inverse multiquadratic kernel with varying kernel bandwidth
@@ -350,11 +354,11 @@ def main():
     true_latent_dim = 4
     timesteps = 4
     num_actions = 4
-    train_iters = 100 * 1000
+    train_iters = 20 * 1000
     encoder = Encoder(latent_dim)
     decoder = Decoder(latent_dim)
     transition = Transition(latent_dim, num_actions)
-    blur = GaussianSmoothing(channels=3, kernel_size=12, sigma=4.)
+    blur = GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
     #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_06a94339'
@@ -389,16 +393,15 @@ def main():
             pred_logits = decoder(z)
 
             expected = states[:, t]
-            actual = torch.sigmoid(pred_logits)
+            predicted = torch.sigmoid(pred_logits)
             # MSE loss
-            rec_loss = torch.mean((expected - actual)**2)
+            #rec_loss = torch.mean((expected - predicted)**2)
             # MSE loss but blurred to prevent pathological behavior
-            #rec_loss = torch.mean((blur(expected) - blur(actual))**2)
-
+            #rec_loss = torch.mean((blur(expected) - blur(predicted))**2)
             # MSE loss but weighted toward foreground pixels
-            error_mask = torch.mean((expected - actual) ** 2, dim=1)
-            foreground_mask = torch.mean(expected, dim=1)
-            error_mask = 0.05 * error_mask + 0.95 * (error_mask * foreground_mask)
+            error_mask = torch.mean((expected - predicted) ** 2, dim=1)
+            foreground_mask = torch.sqrt(torch.mean(blur(expected), dim=1))
+            error_mask = 0.01 * error_mask + 0.99 * (error_mask * foreground_mask)
             rec_loss = torch.mean(error_mask)
 
             ts.collect('Recon. t={}'.format(t), rec_loss)
