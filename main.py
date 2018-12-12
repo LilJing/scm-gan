@@ -49,7 +49,7 @@ class Transition(nn.Module):
         x = torch.softmax(x, dim=2)
         x = x.view(len(z), self.latent_size*self.k)
         x = self.to_dense(x)
-        x = norm(x)
+        #x = norm(x)
         return x
 
 
@@ -355,7 +355,7 @@ def imq_kernel(X: torch.Tensor,
 def mmd_normal_penalty(z, sigma=1.0):
     batch_size, latent_dim = z.shape
     z_fake = torch.randn(batch_size, latent_dim).cuda() * sigma
-    z_fake = norm(z_fake)
+    #z_fake = norm(z_fake)
     mmd_loss = -imq_kernel(z, z_fake, h_dim=latent_dim)
     return mmd_loss.mean()
 
