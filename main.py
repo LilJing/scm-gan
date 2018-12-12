@@ -89,7 +89,7 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, latent_size, k=64, m=3):
+    def __init__(self, latent_size, k=64, m=12):
         super().__init__()
         self.latent_size = latent_size
         num_places = latent_size // 4
@@ -367,15 +367,15 @@ def main():
     latent_dim = 32
     true_latent_dim = 4
     num_actions = 4
-    train_iters = 500 * 1000
+    train_iters = 100 * 1000
     encoder = Encoder(latent_dim)
     decoder = Decoder(latent_dim)
     transition = Transition(latent_dim, num_actions)
     blur = GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
-    #load_from_dir = '/mnt/nfs/experiments/demo_2018_12_12/scm-gan_edf39ae9'
-    load_from_dir = '.'
+    load_from_dir = '/mnt/nfs/experiments/demo_2018_12_12/scm-gan_81bd12cd'
+    #load_from_dir = '.'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -387,11 +387,16 @@ def main():
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     ts = TimeSeries('Training Model', train_iters)
-    for train_iter in range(1, train_iters + 1):
+    for train_iter in range(0, train_iters + 1):
         timesteps = 1 + train_iter // 10000
         encoder.train()
         decoder.train()
         transition.train()
+        # Batch Norm hack: track running stats only during training
+        for model in [encoder, decoder, transition]:
+            for child in model.children():
+                if type(child) in [nn.BatchNorm2d, nn.BatchNorm1d]:
+                    child.track_running_stats = True
 
         opt_enc.zero_grad()
         opt_dec.zero_grad()
@@ -435,9 +440,14 @@ def main():
         opt_trans.step()
         ts.print_every(2)
 
-        encoder.eval()
-        decoder.eval()
-        transition.eval()
+        #encoder.eval()
+        #decoder.eval()
+        #transition.eval()
+        # Batch Norm hack: track running stats only during training
+        for model in [encoder, decoder, transition]:
+            for child in model.children():
+                if type(child) in [nn.BatchNorm2d, nn.BatchNorm1d]:
+                    child.track_running_stats = False
 
         if train_iter % 100 == 0:
             visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
