@@ -73,7 +73,7 @@ class Encoder(nn.Module):
         # Bxlatent_size
         self.cuda()
 
-    def forward(self, x, visualize=False):
+    def forward(self, x, visual_tag=None):
         # Input: B x 1 x 64 x 64
         x = self.conv1(x)
         x = self.bn_conv1(x)
@@ -90,6 +90,10 @@ class Encoder(nn.Module):
 
         x = self.fc2(x)
         x = x.view(-1, self.latent_size, self.k)
+        if visual_tag:
+            imutil.show(x[0], resize_to=(self.k*10, self.latent_size*10),
+                        filename="visual_{}.png".format(visual_tag),
+                        caption="Encoder latent space")
         x = F.softmax(x, dim=2)
         x = self.to_dense(x)
         return x
@@ -120,13 +124,15 @@ class Decoder(nn.Module):
         self.things_fc2 = nn.Linear(128, latent_size*m)
         self.cuda()
 
-    def forward(self, x, visualize=False):
+    def forward(self, x, visual_tag=None):
         # The world consists of things in places.
 
         # Compute places as ring of outer products, one place per latent dim
         x_cat = self.to_categorical(x)
-        if visualize:
-            imutil.show(x_cat[0], resize_to=(640,240), caption="Latent Code", filename='visual_to_cat.png')
+        if visual_tag:
+            imutil.show(x_cat[0], resize_to=(self.k*10, self.latent_size*10),
+                        caption="Latent Code",
+                        filename='visual_to_cat_{}.png'.format(visual_tag))
         places = torch.zeros((len(x_cat), self.latent_size, self.k, self.k)).cuda()
         for i in range(0, self.latent_size, 2):
             shifted = [x_cat[:,i], x_cat[:,i-1]]
@@ -134,6 +140,9 @@ class Decoder(nn.Module):
             places[:, i+1] = torch.einsum('ij,ik->ikj', shifted)
         places = places - places.min()
         places = places / places.max()
+        if visual_tag:
+            cap = 'Decoder normalized places'
+            imutil.show(places[0], filename='visual_places_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
 
         """
         # There are M things, and each thing is in exactly one place at any given time
@@ -147,29 +156,30 @@ class Decoder(nn.Module):
 
         things_in_places = torch.einsum('bpwh,btp->btpwh', [places, things])
         x = things_in_places.sum(dim=2)
-        if visualize:
+        if visual_tag:
             cap = 'Things+Places Map'
-            imutil.show(x[0], filename='visual_conv0.png', resize_to=(256,256), caption=cap)
+            imutil.show(x[0], filename='visual_conv0_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
         """
 
         x = places
         # Draw things in places
+
         x = self.conv1(x)
         x = self.bn_conv1(x)
         x = F.leaky_relu(x, 0.2)
-        if visualize:
-            cap = 'After conv1'
-            imutil.show(x[0], filename='visual_conv1.png', resize_to=(256,256), caption=cap)
+        if visual_tag:
+            cap = 'Decoder conv1'
+            imutil.show(x[0], filename='visual_conv1_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
 
         #x = self.conv2(x)
         #x = self.bn_conv2(x)
         #x = F.leaky_relu(x, 0.2)
         #x = self.conv3(x)
-        x = F.leaky_relu(x, 0.2)
+        #x = F.leaky_relu(x, 0.2)
         x = self.conv4(x)
-        if visualize:
-            cap = 'After conv4'
-            imutil.show(x[0], filename='visual_conv4.png', resize_to=(256,256), caption=cap)
+        if visual_tag:
+            cap = 'Decoder conv4'
+            imutil.show(x[0], filename='visual_conv4_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
         return x
 
 
@@ -373,8 +383,9 @@ def main():
     higgins_scores = []
 
     #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_06a94339'
-    load_from_dir = None
-    if load_from_dir is not None:
+    load_from_dir = '.'
+    if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
+        print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
         decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-decoder.pth')))
         transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
@@ -471,10 +482,14 @@ def visualize_reconstruction(encoder, decoder, states, train_iter=0):
     # Image of reconstruction
     filename = 'vis_iter_{:06d}.png'.format(train_iter)
     ground_truth = states[:, 0]
-    reconstructed = torch.sigmoid(decoder(encoder(ground_truth, visualize=True), visualize=True))
+    tag = 'iter_{:06d}'.format(train_iter)
+    logits = decoder(encoder(ground_truth, visual_tag=tag), visual_tag=tag)
+    reconstructed = torch.sigmoid(logits)
     img = torch.cat((ground_truth[:4], reconstructed[:4]), dim=3)
     caption = 'D(E(x)) iter {}'.format(train_iter)
-    imutil.show(img, filename=filename, caption=caption, img_padding=4, font_size=10)
+    imutil.show(img, resize_to=(640, 360), img_padding=4,
+                filename='visual_reconstruction_{}.png'.format(tag),
+                caption=caption, font_size=10)
 
 
 def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, frames=120, img_size=800):
