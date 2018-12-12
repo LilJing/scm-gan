@@ -103,66 +103,63 @@ class Decoder(nn.Module):
     def __init__(self, latent_size, k=64, m=3):
         super().__init__()
         self.latent_size = latent_size
+        num_places = latent_size // 2
         # K is the number of buckets to use when discretizing
         self.k = k
         # M is the number of kinds of things that there can be
         self.m = m
 
-        self.conv1 = nn.Conv2d(latent_size, 32, 4, stride=2, padding=1)
+        self.to_categorical = RealToCategorical(z=num_places, k=k)
+        self.bn_places = nn.BatchNorm2d(latent_size)
+
+        self.things_fc1 = nn.Linear(num_places, 128)
+        self.things_bn1 = nn.BatchNorm1d(128)
+        self.things_fc2 = nn.Linear(128, num_places * m)
+
+        self.conv1 = nn.Conv2d(self.m, 32, 4, stride=2, padding=1)
         self.bn_conv1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 32, 4, stride=2, padding=1)
         self.bn_conv2 = nn.BatchNorm2d(32)
         self.conv3 = nn.ConvTranspose2d(32, 32, 4, stride=2, padding=1)
         self.bn_conv3 = nn.BatchNorm2d(32)
         self.conv4 = nn.ConvTranspose2d(32, 3, 4, stride=2, padding=1)
-
-        self.to_categorical = RealToCategorical(z=latent_size, k=k)
-        self.bn_places = nn.BatchNorm2d(latent_size)
-
-        self.things_fc1 = nn.Linear(latent_size, 128)
-        self.things_bn1 = nn.BatchNorm1d(128)
-        self.things_fc2 = nn.Linear(128, latent_size*m)
         self.cuda()
 
-    def forward(self, x, visual_tag=None):
+    def forward(self, z, visual_tag=None):
         # The world consists of things in places.
+        num_places = self.latent_size // 2
+        z_places, z_things = z[:, :num_places], z[:, num_places:]
 
         # Compute places as ring of outer products, one place per latent dim
-        x_cat = self.to_categorical(x)
+        x_cat = self.to_categorical(z_places)
         if visual_tag:
             imutil.show(x_cat[0], resize_to=(self.k*10, self.latent_size*10),
                         caption="Latent Code",
                         filename='visual_to_cat_{}.png'.format(visual_tag))
-        places = torch.zeros((len(x_cat), self.latent_size, self.k, self.k)).cuda()
-        for i in range(0, self.latent_size, 2):
+        places = torch.zeros((len(x_cat), num_places, self.k, self.k)).cuda()
+        for i in range(0, num_places):
             shifted = [x_cat[:,i], x_cat[:,i-1]]
             places[:, i]   = torch.einsum('ij,ik->ijk', shifted)
-            places[:, i+1] = torch.einsum('ij,ik->ikj', shifted)
         places = places - places.min()
         places = places / places.max()
         if visual_tag:
             cap = 'Decoder normalized places'
             imutil.show(places[0], filename='visual_places_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
 
-        """
         # There are M things, and each thing is in exactly one place at any given time
-        things = self.things_fc1(x)
+        things = self.things_fc1(z_things)
         things = self.things_bn1(things)
         things = F.leaky_relu(things, 0.2)
         things = self.things_fc2(things)
-        things = things.view(-1, self.m, self.latent_size)
+        things = things.view(-1, num_places, self.m)
         # (batch, number_of_things, number_of_places)
-        things = F.softmax(things, dim=1)
+        things = F.softmax(things, dim=2)
 
-        things_in_places = torch.einsum('bpwh,btp->btpwh', [places, things])
-        x = things_in_places.sum(dim=2)
+        # Draw things in places
+        x = torch.einsum('bpwh,bpm->bmwh', [places, things])
         if visual_tag:
             cap = 'Things+Places Map'
             imutil.show(x[0], filename='visual_conv0_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
-        """
-
-        x = places
-        # Draw things in places
 
         x = self.conv1(x)
         x = self.bn_conv1(x)
@@ -373,9 +370,9 @@ def main():
     batch_size = 64
     latent_dim = 12
     true_latent_dim = 4
-    timesteps = 4
+    timesteps = 1
     num_actions = 4
-    train_iters = 20 * 1000
+    train_iters = 50 * 1000
     encoder = Encoder(latent_dim)
     decoder = Decoder(latent_dim)
     transition = Transition(latent_dim, num_actions)
