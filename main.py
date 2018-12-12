@@ -198,9 +198,9 @@ class RealToCategorical(nn.Module):
         self.k = k
         self.kernel = kernel
         rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
-        self.particles = torch.nn.Parameter(rho)
+        #self.particles = torch.nn.Parameter(rho)
         # For fixed particle positions
-        #self.particles = rho
+        self.particles = rho
 
         # Sharpness/scale parameter
         eta = torch.ones(self.z).cuda() * 30
@@ -232,9 +232,9 @@ class CategoricalToReal(nn.Module):
         self.z = z
         self.k = k
         rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
-        self.particles = torch.nn.Parameter(rho)
+        #self.particles = torch.nn.Parameter(rho)
         # For fixed particle positions
-        #self.particles = rho
+        self.particles = rho
         self.cuda()
 
     def forward(self, x):
