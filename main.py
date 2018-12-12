@@ -32,7 +32,7 @@ class Transition(nn.Module):
         self.latent_size = latent_size
         self.k = k
         self.input_dim = latent_size + num_actions
-        self.to_categorical = SelfOrganizingBucket(latent_size, k)
+        self.to_categorical = RealToCategorical(latent_size, k)
         self.fc1 = nn.Linear(num_actions + self.latent_size*k, 256)
         self.fc2 = nn.Linear(256, latent_size * k)
         self.to_dense = nn.Linear(latent_size*k, latent_size)
@@ -54,9 +54,10 @@ class Transition(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, latent_size):
+    def __init__(self, latent_size, k=64):
         super().__init__()
         self.latent_size = latent_size
+        self.k = k
         # Bx1x64x64
         self.conv1 = nn.Conv2d(3, 8, 4, stride=2, padding=1)
         self.bn_conv1 = nn.BatchNorm2d(8)
@@ -66,9 +67,8 @@ class Encoder(nn.Module):
 
         self.fc1 = nn.Linear(32*16*16, 196)
         self.bn1 = nn.BatchNorm1d(196)
-        self.fc2 = nn.Linear(196, 196)
-        self.bn2 = nn.BatchNorm1d(196)
-        self.fc3 = nn.Linear(196, latent_size)
+        self.fc2 = nn.Linear(196, k*latent_size)
+        self.to_dense = CategoricalToReal(self.latent_size, self.k)
 
         # Bxlatent_size
         self.cuda()
@@ -89,11 +89,9 @@ class Encoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.fc2(x)
-        x = self.bn2(x)
-        x = F.leaky_relu(x)
-
-        x = self.fc3(x)
-        x = norm(x)
+        x = x.view(-1, self.latent_size, self.k)
+        x = F.softmax(x, dim=2)
+        x = self.to_dense(x)
         return x
 
 
@@ -114,7 +112,7 @@ class Decoder(nn.Module):
         self.bn_conv3 = nn.BatchNorm2d(32)
         self.conv4 = nn.ConvTranspose2d(32, 3, 4, stride=2, padding=1)
 
-        self.to_categorical = SelfOrganizingBucket(z=latent_size, k=k)
+        self.to_categorical = RealToCategorical(z=latent_size, k=k)
         self.bn_places = nn.BatchNorm2d(latent_size)
 
         self.things_fc1 = nn.Linear(latent_size, 128)
@@ -175,7 +173,7 @@ class Decoder(nn.Module):
         return x
 
 
-class SelfOrganizingBucket(nn.Module):
+class RealToCategorical(nn.Module):
     """
     Input: Real values eg. -0.25, 4.1, 0
     Output: Categorical encoding like:
@@ -217,12 +215,25 @@ class SelfOrganizingBucket(nn.Module):
             kern = torch.exp(-dist_kern)
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
-        if thermometer:
-            therm = probs.clone()
-            for i in range(1, self.k):
-                therm[:, :, i] = torch.max(probs[:, :, i], therm[:, :, i - 1].clone())
-            probs = 1 - therm
         return probs
+
+
+class CategoricalToReal(nn.Module):
+    def __init__(self, z, k, kernel='gaussian'):
+        super().__init__()
+        self.z = z
+        self.k = k
+        rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
+        #self.particles = torch.nn.Parameter(rho)
+        # For fixed particle positions
+        self.particles = rho
+        self.cuda()
+
+    def forward(self, x):
+        # x is shape (batch, self.k)
+        batch_size, z, k = x.shape
+        particle_weights = self.particles.unsqueeze(0).repeat(batch_size, 1, 1)
+        return torch.einsum('blk,blk->bl', [x, particle_weights])
 
 
 # https://discuss.pytorch.org/t/is-there-anyway-to-do-gaussian-filtering-for-an-image-2d-3d-in-pytorch/12351/8
