@@ -198,9 +198,9 @@ class RealToCategorical(nn.Module):
         self.k = k
         self.kernel = kernel
         rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
-        #self.particles = torch.nn.Parameter(rho)
+        self.particles = torch.nn.Parameter(rho)
         # For fixed particle positions
-        self.particles = rho
+        #self.particles = rho
 
         # Sharpness/scale parameter
         eta = torch.ones(self.z).cuda() * 30
@@ -216,7 +216,8 @@ class RealToCategorical(nn.Module):
         distances = (perceived_locations - reference_locations) ** 2
         # IMQ kernel
         if self.kernel == 'inverse_multiquadratic':
-            kern = .01 / (.01 + distances)
+            scale = (1 / eta)
+            kern = scale / (scale + distances)
         elif self.kernel == 'gaussian':
             dist_kern = torch.einsum('blk,l->blk', [distances, self.eta])
             kern = torch.exp(-dist_kern)
@@ -231,9 +232,9 @@ class CategoricalToReal(nn.Module):
         self.z = z
         self.k = k
         rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
-        #self.particles = torch.nn.Parameter(rho)
+        self.particles = torch.nn.Parameter(rho)
         # For fixed particle positions
-        self.particles = rho
+        #self.particles = rho
         self.cuda()
 
     def forward(self, x):
@@ -372,7 +373,7 @@ def main():
     true_latent_dim = 4
     timesteps = 4
     num_actions = 4
-    train_iters = 50 * 1000
+    train_iters = 20 * 1000
     encoder = Encoder(latent_dim)
     decoder = Decoder(latent_dim)
     transition = Transition(latent_dim, num_actions)
@@ -503,7 +504,7 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
         for z_idx in range(latent_dim):
             z_val = (frame_idx / frames) * (maxval - minval) + minval
             zt[z_idx, z_idx] = z_val
-        output = torch.sigmoid(decoder(norm(zt)))
+        output = torch.sigmoid(decoder(zt))
         caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
         vid.write_frame(output, resize_to=(img_size,img_size), caption=caption, img_padding=8)
     vid.finish()
