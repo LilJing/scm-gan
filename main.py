@@ -374,8 +374,8 @@ def main():
     blur = GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
-    load_from_dir = '/mnt/nfs/experiments/demo_2018_12_12/scm-gan_81bd12cd'
-    #load_from_dir = '.'
+    #load_from_dir = '/mnt/nfs/experiments/demo_2018_12_12/scm-gan_81bd12cd'
+    load_from_dir = '.'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -387,7 +387,7 @@ def main():
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     ts = TimeSeries('Training Model', train_iters)
-    for train_iter in range(0, train_iters + 1):
+    for train_iter in range(1, train_iters + 1):
         timesteps = 1 + train_iter // 10000
         encoder.train()
         decoder.train()
@@ -427,12 +427,22 @@ def main():
 
             ts.collect('Recon. t={}'.format(t), rec_loss)
             loss += rec_loss
+
+            # Latent regression loss: Don't encode non-visible information
+            z_prime = encoder(decoder(z))
+            latent_regression_loss = torch.mean((z - z_prime)**2)
+            ts.collect('Latent reg. t={}'.format(t), latent_regression_loss)
+            loss += latent_regression_loss
+
             # Predict the next latent point
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             z = transition(z, onehot_a)
+
+            # Maximum Mean Discrepancy: Regularization toward gaussian
             # mmd_loss = mmd_normal_penalty(z)
             # ts.collect('MMD Loss t={}'.format(t), mmd_loss)
             # loss += mmd_loss
+
         loss.backward()
 
         opt_enc.step()
