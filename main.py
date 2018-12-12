@@ -49,8 +49,7 @@ class Transition(nn.Module):
         x = torch.softmax(x, dim=2)
         x = x.view(len(z), self.latent_size*self.k)
         x = self.to_dense(x)
-        #x = norm(x)
-        return x
+        return z + x
 
 
 class Encoder(nn.Module):
@@ -139,10 +138,11 @@ class Decoder(nn.Module):
         places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
         for i in range(0, num_places):
             # Hack: stipple pattern
-            horiz = torch.zeros(batch_size, self.k).cuda()
-            horiz[:,::2] = x_cat[:,i*2,::2]
-            vert = torch.zeros(batch_size, self.k).cuda()
-            vert[:,::2] = x_cat[:,(i*2)+1,::2]
+            #horiz = torch.zeros(batch_size, self.k).cuda()
+            #horiz[:,::2] = x_cat[:,i*2,::2]
+            #vert = torch.zeros(batch_size, self.k).cuda()
+            #vert[:,::2] = x_cat[:,(i*2)+1,::2]
+            horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
             places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
         places = places - places.min()
         places = places / places.max()
@@ -376,16 +376,15 @@ def main():
     batch_size = 64
     latent_dim = 16
     true_latent_dim = 4
-    timesteps = 4
     num_actions = 4
-    train_iters = 20 * 1000
+    train_iters = 50 * 1000
     encoder = Encoder(latent_dim)
     decoder = Decoder(latent_dim)
     transition = Transition(latent_dim, num_actions)
     blur = GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_06a94339'
+    #load_from_dir = '/mnt/nfs/experiments/demo_2018_12_12/scm-gan_edf39ae9'
     load_from_dir = '.'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
@@ -399,6 +398,7 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
+        timesteps = 1 + train_iter // 10000
         encoder.train()
         decoder.train()
         transition.train()
@@ -426,7 +426,8 @@ def main():
             # MSE loss but weighted toward foreground pixels
             error_mask = torch.mean((expected - predicted) ** 2, dim=1)
             foreground_mask = torch.mean(blur(expected), dim=1)
-            error_mask = 0.05 * error_mask + 0.95 * (error_mask * foreground_mask)
+            theta = (train_iter / train_iters)
+            error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
             rec_loss = torch.mean(error_mask)
 
             ts.collect('Recon. t={}'.format(t), rec_loss)
