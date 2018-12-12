@@ -103,16 +103,15 @@ class Decoder(nn.Module):
     def __init__(self, latent_size, k=64, m=3):
         super().__init__()
         self.latent_size = latent_size
-        num_places = latent_size // 2
+        num_places = latent_size // 4
         # K is the number of buckets to use when discretizing
         self.k = k
         # M is the number of kinds of things that there can be
         self.m = m
 
-        self.to_categorical = RealToCategorical(z=num_places, k=k)
-        self.bn_places = nn.BatchNorm2d(latent_size)
+        self.to_categorical = RealToCategorical(z=latent_size//2, k=k)
 
-        self.things_fc1 = nn.Linear(num_places, 128)
+        self.things_fc1 = nn.Linear(num_places*2, 128)
         self.things_bn1 = nn.BatchNorm1d(128)
         self.things_fc2 = nn.Linear(128, num_places * m)
 
@@ -127,21 +126,27 @@ class Decoder(nn.Module):
 
     def forward(self, z, visual_tag=None):
         # The world consists of things in places.
-        num_places = self.latent_size // 2
-        z_places, z_things = z[:, :num_places], z[:, num_places:]
+        batch_size = len(z)
+        num_places = self.latent_size // 4
+        z_places, z_things = z[:, :num_places*2], z[:, num_places*2:]
 
         # Compute places as ring of outer products, one place per latent dim
         x_cat = self.to_categorical(z_places)
         if visual_tag:
             imutil.show(x_cat[0], resize_to=(self.k*10, self.latent_size*10),
-                        caption="Latent Code",
+                        caption="Decoder categorical",
                         filename='visual_to_cat_{}.png'.format(visual_tag))
-        places = torch.zeros((len(x_cat), num_places, self.k, self.k)).cuda()
+        places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
         for i in range(0, num_places):
-            shifted = [x_cat[:,i], x_cat[:,i-1]]
-            places[:, i]   = torch.einsum('ij,ik->ijk', shifted)
+            # Hack: stipple pattern
+            horiz = torch.zeros(batch_size, self.k).cuda()
+            horiz[:,::2] = x_cat[:,i*2,::2]
+            vert = torch.zeros(batch_size, self.k).cuda()
+            vert[:,::2] = x_cat[:,(i*2)+1,::2]
+            places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
         places = places - places.min()
         places = places / places.max()
+        places = places**2
         if visual_tag:
             cap = 'Decoder normalized places'
             imutil.show(places[0], filename='visual_places_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
@@ -369,7 +374,7 @@ def norm(x):
 
 def main():
     batch_size = 64
-    latent_dim = 12
+    latent_dim = 16
     true_latent_dim = 4
     timesteps = 4
     num_actions = 4
@@ -420,8 +425,8 @@ def main():
             #rec_loss = torch.mean((blur(expected) - blur(predicted))**2)
             # MSE loss but weighted toward foreground pixels
             error_mask = torch.mean((expected - predicted) ** 2, dim=1)
-            foreground_mask = torch.sqrt(torch.mean(blur(expected), dim=1))
-            error_mask = 0.01 * error_mask + 0.99 * (error_mask * foreground_mask)
+            foreground_mask = torch.mean(blur(expected), dim=1)
+            error_mask = 0.05 * error_mask + 0.95 * (error_mask * foreground_mask)
             rec_loss = torch.mean(error_mask)
 
             ts.collect('Recon. t={}'.format(t), rec_loss)
