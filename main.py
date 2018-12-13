@@ -56,8 +56,7 @@ class Encoder(nn.Module):
 
         self.fc1 = nn.Linear(32*16*16, 196)
         self.bn1 = nn.InstanceNorm1d(196)
-        self.fc2 = nn.Linear(196, k*latent_size)
-        self.to_dense = CategoricalToReal(self.latent_size, self.k)
+        self.fc2 = nn.Linear(196, latent_size)
 
         # Bxlatent_size
         self.cuda()
@@ -78,13 +77,6 @@ class Encoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.fc2(x)
-        x = x.view(-1, self.latent_size, self.k)
-        if visual_tag:
-            imutil.show(x[0], resize_to=(self.k*10, self.latent_size*10),
-                        filename="visual_{}.png".format(visual_tag),
-                        caption="Encoder latent space")
-        x = F.softmax(x, dim=2)
-        x = self.to_dense(x)
         return x
 
 
@@ -101,9 +93,12 @@ class Decoder(nn.Module):
         self.to_categorical = RealToCategorical(z=latent_size//2, k=k)
 
         # Separable convolutions
-        self.places_conv1 = nn.Conv2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places)
-        self.places_conv2 = nn.ConvTranspose2d(num_places*16, num_places, kernel_size=7, padding=3, groups=num_places)
-        self.to_rgb = nn.Conv2d(num_places, 3, kernel_size=1)
+        self.places_conv1 = nn.ConvTranspose2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places)
+        # Hack: input is just one single pixel, so scale weights by the square of kernel size
+        self.places_conv1.weight.data *= 5*5
+        self.places_conv2 = nn.ConvTranspose2d(num_places*16, num_places*16, kernel_size=5, padding=2, groups=num_places)
+        #self.places_conv2.weight.data *= 5*5
+        self.to_rgb = nn.ConvTranspose2d(num_places*16, 3, kernel_size=3, padding=1)
 
         self.things_fc1 = nn.Linear(self.latent_size//2, 128)
         self.things_bn1 = nn.InstanceNorm1d(128)
@@ -126,26 +121,41 @@ class Decoder(nn.Module):
         places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
         for i in range(0, num_places):
             horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
+            # Sample from horiz and from vert to select a spatial point
+            horiz = gumbel_sample_1d(horiz)
+            vert = gumbel_sample_1d(vert)
             places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
-        places = places - places.min()
-        places = places / places.max()
-        places = places**2
+
+        #places = places - places.min()
+        #places = places / places.max()
+        places *= 100
         if visual_tag:
             cap = 'Decoder normalized places'
             imutil.show(places[0], filename='visual_places_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
+        """
+        # Now treat the places as PDFs and sample from them using the Gumbel trick
+        from torch.distributions.gumbel import Gumbel
+        noise = Gumbel(torch.zeros(size=(8,64,64)), .01 * torch.ones(size=(8,64,64))).sample().cuda()
+        places += noise
+        max_points = places.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
+        places = places * (places == max_points).type(torch.FloatTensor).cuda()
+        """
 
+        # After deciding where things are, draw image of those things
+        x = self.places_conv1(places)
+        x = F.leaky_relu(x, 0.2)
+        x = self.places_conv2(x)
+        x = F.leaky_relu(x, 0.2)
+        x = torch.sigmoid(self.to_rgb(x))
+        return x
+        """
+        # Now turn some of the things on or off
         things = self.things_fc1(z_things)
         things = F.leaky_relu(things, 0.2)
         things = self.things_bn1(things)
         things = self.things_fc2(things)
         attention = torch.sigmoid(things)
 
-        x = self.places_conv1(places)
-        x = F.relu(x)
-        x = self.places_conv2(x)
-        x = F.relu(x)
-
-        # Attention mask among locations
         x = torch.einsum('bcwh,bc->bcwh', [x, attention])
 
         x = self.to_rgb(x)
@@ -153,6 +163,15 @@ class Decoder(nn.Module):
             cap = 'Decoder output'
             imutil.show(x[0], filename='visual_convrgb_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
         return x
+        """
+
+
+def gumbel_sample_1d(pdf, beta=.01):
+    from torch.distributions.gumbel import Gumbel
+    noise = Gumbel(torch.zeros(size=pdf.shape), beta * torch.ones(size=pdf.shape)).sample().cuda()
+    pdf = pdf + noise
+    max_points = pdf.max(dim=1, keepdim=True)[0]
+    return pdf * (pdf == max_points).type(torch.FloatTensor).cuda()
 
 
 class RealToCategorical(nn.Module):
@@ -173,50 +192,39 @@ class RealToCategorical(nn.Module):
         self.k = k
         self.kernel = kernel
         rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
-        #self.particles = torch.nn.Parameter(rho)
+        self.rho = torch.nn.Parameter(rho)
         # For fixed particle positions
-        self.particles = rho
+        #self.rho = rho
 
         # Sharpness/scale parameter
-        eta = torch.ones(self.z).cuda() * 30
+        eta = torch.ones(self.z).cuda()
         self.eta = torch.nn.Parameter(eta)
         self.cuda()
+        #self.register_backward_hook(self.hook)
 
-    def forward(self, x, thermometer=False):
+    def hook(self, *args):
+        print(self.eta)
+        print(self.rho)
+
+    def forward(self, x):
         # x is a real-valued tensor size (batch, Z)
         batch_size = len(x)
         # Broadcast x to (batch, Z, K)
         perceived_locations = x.unsqueeze(-1).repeat(1, 1, self.k)
-        reference_locations = self.particles.unsqueeze(0).repeat(batch_size, 1, 1)
-        distances = (perceived_locations - reference_locations) ** 2
+        reference_locations = self.rho.unsqueeze(0).repeat(batch_size, 1, 1)
+        distances = (perceived_locations - reference_locations)
+        distances = torch.einsum('bzk,z->bzk', [distances, self.eta])
         # IMQ kernel
         if self.kernel == 'inverse_multiquadratic':
-            scale = (1 / eta)
-            kern = scale / (scale + distances)
+            eps = .001
+            kern = eps / (eps + distances**2)
         elif self.kernel == 'gaussian':
-            dist_kern = torch.einsum('blk,l->blk', [distances, self.eta])
-            kern = torch.exp(-dist_kern)
+            kern = torch.exp(-distances**2)
+        #kern = torch.einsum('bzk,z->bzk', [kern, self.eta])
+        kern = kern * 10
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
         return probs
-
-
-class CategoricalToReal(nn.Module):
-    def __init__(self, z, k, kernel='gaussian'):
-        super().__init__()
-        self.z = z
-        self.k = k
-        rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
-        #self.particles = torch.nn.Parameter(rho)
-        # For fixed particle positions
-        self.particles = rho
-        self.cuda()
-
-    def forward(self, x):
-        # x is shape (batch, self.k)
-        batch_size, z, k = x.shape
-        particle_weights = self.particles.unsqueeze(0).repeat(batch_size, 1, 1)
-        return torch.einsum('blk,blk->bl', [x, particle_weights])
 
 
 # https://discuss.pytorch.org/t/is-there-anyway-to-do-gaussian-filtering-for-an-image-2d-3d-in-pytorch/12351/8
@@ -363,12 +371,13 @@ def main():
         transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
 
     # Train the autoencoder
-    opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
-    opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
-    opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
+    opt_enc = torch.optim.Adam(encoder.parameters(), lr=.01)
+    opt_dec = torch.optim.Adam(decoder.parameters(), lr=.01)
+    opt_trans = torch.optim.Adam(transition.parameters(), lr=.01)
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
-        timesteps = 1 + train_iter // 10000
+        #timesteps = 1 + train_iter // 10000
+        timesteps = 1
         encoder.train()
         decoder.train()
         transition.train()
@@ -396,7 +405,8 @@ def main():
             # MSE loss but weighted toward foreground pixels
             error_mask = torch.mean((expected - predicted) ** 2, dim=1)
             foreground_mask = torch.mean(blur(expected), dim=1)
-            theta = (train_iter / train_iters)
+            #theta = (train_iter / train_iters)
+            theta = 0
             error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
             rec_loss = torch.mean(error_mask)
 
@@ -482,7 +492,7 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
     for i in range(1, latent_dim):
         ground_truth[i] = ground_truth[0]
     zt = encoder(ground_truth[:latent_dim])
-    minval, maxval = decoder.to_categorical.particles.min(), decoder.to_categorical.particles.max()
+    minval, maxval = decoder.to_categorical.rho.min(), decoder.to_categorical.rho.max()
 
     # Generate L videos, one per latent dimension
     vid = imutil.Video('latent_traversal_dims_{:04d}_iter_{:06d}'.format(latent_dim, train_iter))
