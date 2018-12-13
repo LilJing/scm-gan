@@ -49,13 +49,13 @@ class Encoder(nn.Module):
         self.k = k
         # Bx1x64x64
         self.conv1 = nn.Conv2d(3, 8, 4, stride=2, padding=1)
-        self.bn_conv1 = nn.BatchNorm2d(8)
+        self.bn_conv1 = nn.InstanceNorm2d(8)
         # Bx8x32x32
         self.conv2 = nn.Conv2d(8, 32, 4, stride=2, padding=1)
-        self.bn_conv2 = nn.BatchNorm2d(32)
+        self.bn_conv2 = nn.InstanceNorm2d(32)
 
         self.fc1 = nn.Linear(32*16*16, 196)
-        self.bn1 = nn.BatchNorm1d(196)
+        self.bn1 = nn.InstanceNorm1d(196)
         self.fc2 = nn.Linear(196, k*latent_size)
         self.to_dense = CategoricalToReal(self.latent_size, self.k)
 
@@ -100,17 +100,15 @@ class Decoder(nn.Module):
 
         self.to_categorical = RealToCategorical(z=latent_size//2, k=k)
 
-        self.things_fc1 = nn.Linear(num_places*2, 128)
-        self.things_bn1 = nn.BatchNorm1d(128)
-        self.things_fc2 = nn.Linear(128, num_places * m)
+        # Separable convolutions
+        self.places_conv1 = nn.Conv2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places)
+        self.places_conv2 = nn.ConvTranspose2d(num_places*16, num_places, kernel_size=7, padding=3, groups=num_places)
+        self.to_rgb = nn.Conv2d(num_places, 3, kernel_size=1)
 
-        self.conv1 = nn.Conv2d(self.m, 32, 4, stride=2, padding=1)
-        self.bn_conv1 = nn.BatchNorm2d(32)
-        self.conv2 = nn.Conv2d(32, 32, 4, stride=2, padding=1)
-        self.bn_conv2 = nn.BatchNorm2d(32)
-        self.conv3 = nn.ConvTranspose2d(32, 32, 4, stride=2, padding=1)
-        self.bn_conv3 = nn.BatchNorm2d(32)
-        self.conv4 = nn.ConvTranspose2d(32, 3, 4, stride=2, padding=1)
+        self.things_fc1 = nn.Linear(self.latent_size//2, 128)
+        self.things_bn1 = nn.InstanceNorm1d(128)
+        self.things_fc2 = nn.Linear(128, num_places)
+
         self.cuda()
 
     def forward(self, z, visual_tag=None):
@@ -127,11 +125,6 @@ class Decoder(nn.Module):
                         filename='visual_to_cat_{}.png'.format(visual_tag))
         places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
         for i in range(0, num_places):
-            # Hack: stipple pattern
-            #horiz = torch.zeros(batch_size, self.k).cuda()
-            #horiz[:,::2] = x_cat[:,i*2,::2]
-            #vert = torch.zeros(batch_size, self.k).cuda()
-            #vert[:,::2] = x_cat[:,(i*2)+1,::2]
             horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
             places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
         places = places - places.min()
@@ -141,37 +134,24 @@ class Decoder(nn.Module):
             cap = 'Decoder normalized places'
             imutil.show(places[0], filename='visual_places_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
 
-        # There are M things, and each thing is in exactly one place at any given time
         things = self.things_fc1(z_things)
-        things = self.things_bn1(things)
         things = F.leaky_relu(things, 0.2)
+        things = self.things_bn1(things)
         things = self.things_fc2(things)
-        things = things.view(-1, num_places, self.m)
-        # (batch, number_of_things, number_of_places)
-        things = F.softmax(things, dim=2)
+        attention = torch.sigmoid(things)
 
-        # Draw things in places
-        x = torch.einsum('bpwh,bpm->bmwh', [places, things])
-        if visual_tag:
-            cap = 'Things+Places Map'
-            imutil.show(x[0], filename='visual_conv0_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
+        x = self.places_conv1(places)
+        x = F.relu(x)
+        x = self.places_conv2(x)
+        x = F.relu(x)
 
-        x = self.conv1(x)
-        x = self.bn_conv1(x)
-        x = F.leaky_relu(x, 0.2)
-        if visual_tag:
-            cap = 'Decoder conv1'
-            imutil.show(x[0], filename='visual_conv1_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
+        # Attention mask among locations
+        x = torch.einsum('bcwh,bc->bcwh', [x, attention])
 
-        #x = self.conv2(x)
-        #x = self.bn_conv2(x)
-        #x = F.leaky_relu(x, 0.2)
-        #x = self.conv3(x)
-        #x = F.leaky_relu(x, 0.2)
-        x = self.conv4(x)
+        x = self.to_rgb(x)
         if visual_tag:
-            cap = 'Decoder conv4'
-            imutil.show(x[0], filename='visual_conv4_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
+            cap = 'Decoder output'
+            imutil.show(x[0], filename='visual_convrgb_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
         return x
 
 
@@ -392,11 +372,6 @@ def main():
         encoder.train()
         decoder.train()
         transition.train()
-        # Batch Norm hack: track running stats only during training
-        for model in [encoder, decoder, transition]:
-            for child in model.children():
-                if type(child) in [nn.BatchNorm2d, nn.BatchNorm1d]:
-                    child.track_running_stats = True
 
         opt_enc.zero_grad()
         opt_dec.zero_grad()
@@ -429,10 +404,10 @@ def main():
             loss += rec_loss
 
             # Latent regression loss: Don't encode non-visible information
-            z_prime = encoder(decoder(z))
-            latent_regression_loss = torch.mean((z - z_prime)**2)
-            ts.collect('Latent reg. t={}'.format(t), latent_regression_loss)
-            loss += latent_regression_loss
+            #z_prime = encoder(decoder(z))
+            #latent_regression_loss = torch.mean((z - z_prime)**2)
+            #ts.collect('Latent reg. t={}'.format(t), latent_regression_loss)
+            #loss += latent_regression_loss
 
             # Predict the next latent point
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
@@ -450,14 +425,9 @@ def main():
         opt_trans.step()
         ts.print_every(2)
 
-        #encoder.eval()
-        #decoder.eval()
-        #transition.eval()
-        # Batch Norm hack: track running stats only during training
-        for model in [encoder, decoder, transition]:
-            for child in model.children():
-                if type(child) in [nn.BatchNorm2d, nn.BatchNorm1d]:
-                    child.track_running_stats = False
+        encoder.eval()
+        decoder.eval()
+        transition.eval()
 
         if train_iter % 100 == 0:
             visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
@@ -521,6 +491,8 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
             z_val = (frame_idx / frames) * (maxval - minval) + minval
             zt[z_idx, z_idx] = z_val
         output = torch.sigmoid(decoder(zt))
+        reconstructed = decoder(encoder(ground_truth[:1]))
+        output = torch.cat([ground_truth[:1], reconstructed, output], dim=0)
         caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
         vid.write_frame(output, resize_to=(img_size,img_size), caption=caption, img_padding=8)
     vid.finish()
