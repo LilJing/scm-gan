@@ -60,7 +60,7 @@ class MinipongEnv():
 
 
 def build_state(left_y, right_y, ball_x, ball_y, ball_velocity):
-    state = np.zeros((CHANNELS, GAME_SIZE, GAME_SIZE))
+    state = np.ones((CHANNELS, GAME_SIZE, GAME_SIZE)) * 0.1
 
     left_y = np.clip(left_y, paddle_height, GAME_SIZE - paddle_height)
     right_y = np.clip(right_y, paddle_height, GAME_SIZE - paddle_height)

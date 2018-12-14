@@ -93,12 +93,12 @@ class Decoder(nn.Module):
         self.to_categorical = RealToCategorical(z=latent_size//2, k=k)
 
         # Separable convolutions
-        self.places_conv1 = nn.ConvTranspose2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places)
+        self.places_conv1 = nn.ConvTranspose2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
         # Hack: input is just one single pixel, so scale weights by the square of kernel size
         self.places_conv1.weight.data *= 5*5
-        self.places_conv2 = nn.ConvTranspose2d(num_places*16, num_places*16, kernel_size=5, padding=2, groups=num_places)
+        self.places_conv2 = nn.ConvTranspose2d(num_places*16, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
         #self.places_conv2.weight.data *= 5*5
-        self.to_rgb = nn.ConvTranspose2d(num_places*16, 3, kernel_size=3, padding=1)
+        self.to_rgb = nn.ConvTranspose2d(16, 3, kernel_size=3, padding=1)
 
         self.things_fc1 = nn.Linear(self.latent_size//2, 128)
         self.things_bn1 = nn.InstanceNorm1d(128)
@@ -127,8 +127,8 @@ class Decoder(nn.Module):
             places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
 
         #places = places - places.min()
-        #places = places / places.max()
-        places *= 100
+        places = places / places.max()
+        #places *= 100
         if visual_tag:
             cap = 'Decoder normalized places'
             imutil.show(places[0], filename='visual_places_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
@@ -146,7 +146,20 @@ class Decoder(nn.Module):
         x = F.leaky_relu(x, 0.2)
         x = self.places_conv2(x)
         x = F.leaky_relu(x, 0.2)
-        x = torch.sigmoid(self.to_rgb(x))
+        # The things
+        x = x.view(batch_size, -1, 16, 64, 64)
+        if visual_tag:
+            cap = 'Things range {:.03f}-{:.03f}'.format(x.min(), x.max())
+            things_vis = []
+            for i in range(num_places):
+                things_vis.append(self.to_rgb(x[:,i])[0].unsqueeze(0))
+            imutil.show(torch.cat(things_vis), filename='the_things_{}.png'.format(visual_tag), resize_to=(128*8,128*8), caption=cap, font_size=8, img_padding=10)
+        # The sum of the things
+        x = x.sum(dim=1)
+        x = self.to_rgb(x)
+
+        # Little bit of gaussian noise on the logits
+        x = x + .01 * x.new(x.size()).normal_()
         return x
         """
         # Now turn some of the things on or off
@@ -197,8 +210,8 @@ class RealToCategorical(nn.Module):
         #self.rho = rho
 
         # Sharpness/scale parameter
-        eta = torch.ones(self.z).cuda()
-        self.eta = torch.nn.Parameter(eta)
+        self.eta = torch.nn.Parameter(torch.ones(self.z).cuda())
+        self.ksi = torch.nn.Parameter(torch.ones(self.z).cuda())
         self.cuda()
         #self.register_backward_hook(self.hook)
 
@@ -220,7 +233,7 @@ class RealToCategorical(nn.Module):
             kern = eps / (eps + distances**2)
         elif self.kernel == 'gaussian':
             kern = torch.exp(-distances**2)
-        #kern = torch.einsum('bzk,z->bzk', [kern, self.eta])
+        #kern = torch.einsum('bzk,z->bzk', [kern, self.ksi])
         kern = kern * 10
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
@@ -352,7 +365,7 @@ def norm(x):
 
 def main():
     batch_size = 64
-    latent_dim = 32
+    latent_dim = 64
     true_latent_dim = 4
     num_actions = 4
     train_iters = 100 * 1000
@@ -395,6 +408,8 @@ def main():
         z = encoder(states[:, 0])
         for t in range(timesteps):
             pred_logits = decoder(z)
+            ts.collect('logits min', pred_logits.min())
+            ts.collect('logits max', pred_logits.max())
 
             expected = states[:, t]
             predicted = torch.sigmoid(pred_logits)
