@@ -10,7 +10,7 @@ CHANNELS = 3
 GAME_SIZE = 64
 paddle_width = 3
 paddle_height = 4
-ball_size = 6
+ball_size = 4
 left_x = 15
 right_x = GAME_SIZE - 15
 

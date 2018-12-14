@@ -107,7 +107,7 @@ class Decoder(nn.Module):
 
         self.cuda()
 
-    def forward(self, z, visual_tag=None):
+    def forward(self, z, visual_tag=None, enable_aux_loss=False):
         # The world consists of things in places.
         batch_size = len(z)
         num_places = self.latent_size // 4
@@ -119,23 +119,29 @@ class Decoder(nn.Module):
             imutil.show(x_cat[0], font_size=8, resize_to=(self.k*10, self.latent_size),
                         caption="Decoder categorical {}".format(visual_tag),
                         filename='visual_to_cat_{}.png'.format(visual_tag))
-        places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
 
+        places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
+        sampled_points = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
         for i in range(0, num_places):
             horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
+            places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
             # Sample from horiz and from vert to select a spatial point
             horiz = gumbel_sample_1d(horiz)
             vert = gumbel_sample_1d(vert)
-            places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
+            sampled_points[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
 
-        # Normalize to disincentivize overlap among position distributions
+        # Disincentivize overlap among position distributions
+        overlap_metric = torch.exp(places.sum(dim=1)).mean()
+
         #places = places / (places.mean() + places.sum(dim=1, keepdim=True))
 
         if visual_tag:
             cap = 'Places min {:.03f} max {:.03f}'.format(places.min(), places.max())
             imutil.show(places[0] / places[0].max(), filename='visual_places_{}.png'.format(visual_tag),
                         resize_to=(512,512), caption=cap, img_padding=8)
-        sampled_points = places
+            cap = 'Samples min {:.03f} max {:.03f}'.format(sampled_points.min(), sampled_points.max())
+            imutil.show(sampled_points[0] > 0, filename='visual_sampled_{}.png'.format(visual_tag),
+                        resize_to=(512,512), caption=cap, img_padding=8)
 
         """
         # Sample a location
@@ -170,6 +176,8 @@ class Decoder(nn.Module):
 
         # Throw some noise in for training gradient purposes
         x = x + x.new(x.shape).normal_(0, .01)
+        if enable_aux_loss:
+            return x, overlap_metric
         return x
 
 
@@ -418,10 +426,13 @@ def main():
         # Predict the output of the game
         loss = 0
         z = encoder(states[:, 0])
+        ts.collect('encoder z[0] mean', z[0].mean())
         for t in range(timesteps):
-            pred_logits = decoder(z)
+            pred_logits, aux_loss = decoder(z, enable_aux_loss=True)
             ts.collect('logits min', pred_logits.min())
             ts.collect('logits max', pred_logits.max())
+            ts.collect('aux loss', aux_loss)
+            loss += aux_loss
 
             expected = states[:, t]
             predicted = torch.sigmoid(pred_logits)
@@ -554,7 +565,7 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
     for t in range(timesteps):
         x_t = torch.sigmoid(decoder(z))
         img = torch.cat((states[:, t][:4], x_t[:4]), dim=3)
-        caption = 'Pred. t+{} a={}'.format(t, actions[:, t])
+        caption = 'Pred. t+{} a={}'.format(t, actions[:4, t])
         vid.write_frame(img, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
         # Predict the next latent point
         onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
