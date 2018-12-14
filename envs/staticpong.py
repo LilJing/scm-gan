@@ -60,7 +60,7 @@ class MinipongEnv():
 
 
 def build_state(left_y, right_y, ball_x, ball_y, ball_velocity):
-    state = np.ones((CHANNELS, GAME_SIZE, GAME_SIZE)) * .25
+    state = np.ones((CHANNELS, GAME_SIZE, GAME_SIZE)) * .5
 
     # HACK
     left_y = 20

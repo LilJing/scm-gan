@@ -49,14 +49,15 @@ class Encoder(nn.Module):
         self.k = k
         # Bx1x64x64
         self.conv1 = nn.Conv2d(3, 8, 4, stride=2, padding=1)
-        self.bn_conv1 = nn.InstanceNorm2d(8)
+        self.bn_conv1 = nn.BatchNorm2d(8)
         # Bx8x32x32
-        self.conv2 = nn.Conv2d(8, 32, 4, stride=2, padding=1)
-        self.bn_conv2 = nn.InstanceNorm2d(32)
+        self.conv2 = nn.Conv2d(8, 8, 4, stride=2, padding=1)
+        self.bn_conv2 = nn.BatchNorm2d(8)
 
-        self.fc1 = nn.Linear(32*16*16, 196)
-        self.bn1 = nn.InstanceNorm1d(196)
-        self.fc2 = nn.Linear(196, latent_size)
+        self.fc1 = nn.Linear(8*16*16, 128)
+        self.bn1 = nn.BatchNorm1d(128)
+        self.fc2 = nn.Linear(128, latent_size)
+        self.fc2.weight.data.normal_(0, .1)
 
         # Bxlatent_size
         self.cuda()
@@ -71,7 +72,7 @@ class Encoder(nn.Module):
         x = self.bn_conv2(x)
         x = F.leaky_relu(x)
 
-        x = x.view(-1, 32*16*16)
+        x = x.view(-1, 8*16*16)
         x = self.fc1(x)
         x = self.bn1(x)
         x = F.leaky_relu(x)
@@ -93,15 +94,15 @@ class Decoder(nn.Module):
         self.to_categorical = RealToCategorical(z=latent_size//2, k=k)
 
         # Separable convolutions
-        self.places_conv1 = nn.ConvTranspose2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
+        self.places_conv1 = nn.ConvTranspose2d(num_places, num_places*3, kernel_size=5, padding=2, groups=num_places, bias=False)
         # Hack: input is just one single pixel, so scale weights by the square of kernel size
         self.places_conv1.weight.data *= 5*5
-        self.places_conv2 = nn.ConvTranspose2d(num_places*16, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
+        self.places_conv2 = nn.ConvTranspose2d(num_places*3, num_places*3, kernel_size=5, padding=2, groups=num_places, bias=False)
         #self.places_conv2.weight.data *= 5*5
-        self.to_rgb = nn.ConvTranspose2d(16, 3, kernel_size=3, padding=1)
+        self.to_rgb = nn.ConvTranspose2d(3, 3, kernel_size=3, padding=1, bias=False)
 
         self.things_fc1 = nn.Linear(self.latent_size//2, 128)
-        self.things_bn1 = nn.InstanceNorm1d(128)
+        self.things_bn1 = nn.BatchNorm1d(128)
         self.things_fc2 = nn.Linear(128, num_places)
 
         self.cuda()
@@ -115,68 +116,47 @@ class Decoder(nn.Module):
         # Compute places as ring of outer products, one place per latent dim
         x_cat = self.to_categorical(z_places)
         if visual_tag:
-            imutil.show(x_cat[0], resize_to=(self.k*10, self.latent_size*10),
-                        caption="Decoder categorical",
+            imutil.show(x_cat[0], font_size=8, resize_to=(self.k*10, self.latent_size),
+                        caption="Decoder categorical {}".format(visual_tag),
                         filename='visual_to_cat_{}.png'.format(visual_tag))
         places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
+
         for i in range(0, num_places):
             horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
             # Sample from horiz and from vert to select a spatial point
-            horiz = gumbel_sample_1d(horiz)
-            vert = gumbel_sample_1d(vert)
+            #horiz = gumbel_sample_1d(horiz)
+            #vert = gumbel_sample_1d(vert)
             places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
 
-        #places = places - places.min()
-        places = places / places.max()
-        #places *= 100
+        # Normalize to cover the whole space
+        #places = places / places.sum(dim=1, keepdim=True)
+
         if visual_tag:
             cap = 'Decoder normalized places'
-            imutil.show(places[0], filename='visual_places_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
-        """
-        # Now treat the places as PDFs and sample from them using the Gumbel trick
-        from torch.distributions.gumbel import Gumbel
-        noise = Gumbel(torch.zeros(size=(8,64,64)), .01 * torch.ones(size=(8,64,64))).sample().cuda()
-        places += noise
-        max_points = places.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
-        places = places * (places == max_points).type(torch.FloatTensor).cuda()
-        """
+            imutil.show(places[0] / places[0].max(), filename='visual_places_{}.png'.format(visual_tag),
+                        resize_to=(256,256), caption=cap, img_padding=8)
 
-        # After deciding where things are, draw image of those things
+        # Sample a location
+        places = gumbel_sample_2d(places)
+
+        # Apply separable convolutions to draw
         x = self.places_conv1(places)
         x = F.leaky_relu(x, 0.2)
         x = self.places_conv2(x)
         x = F.leaky_relu(x, 0.2)
-        # The things
-        x = x.view(batch_size, -1, 16, 64, 64)
+        x = x.view(batch_size, -1, 3, 64, 64)
         if visual_tag:
             cap = 'Things range {:.03f}-{:.03f}'.format(x.min(), x.max())
             things_vis = []
             for i in range(num_places):
                 things_vis.append(self.to_rgb(x[:,i])[0].unsqueeze(0))
             imutil.show(torch.cat(things_vis), filename='the_things_{}.png'.format(visual_tag), resize_to=(128*8,128*8), caption=cap, font_size=8, img_padding=10)
-        # The sum of the things
+
+        # Combine independent additive objects-in-locations
         x = x.sum(dim=1)
         x = self.to_rgb(x)
 
-        # Little bit of gaussian noise on the logits
-        x = x + .01 * x.new(x.size()).normal_()
         return x
-        """
-        # Now turn some of the things on or off
-        things = self.things_fc1(z_things)
-        things = F.leaky_relu(things, 0.2)
-        things = self.things_bn1(things)
-        things = self.things_fc2(things)
-        attention = torch.sigmoid(things)
-
-        x = torch.einsum('bcwh,bc->bcwh', [x, attention])
-
-        x = self.to_rgb(x)
-        if visual_tag:
-            cap = 'Decoder output'
-            imutil.show(x[0], filename='visual_convrgb_{}.png'.format(visual_tag), resize_to=(256,256), caption=cap)
-        return x
-        """
 
 
 def gumbel_sample_1d(pdf, beta=.01):
@@ -184,6 +164,15 @@ def gumbel_sample_1d(pdf, beta=.01):
     noise = Gumbel(torch.zeros(size=pdf.shape), beta * torch.ones(size=pdf.shape)).sample().cuda()
     pdf = pdf + noise
     max_points = pdf.max(dim=1, keepdim=True)[0]
+    return pdf * (pdf == max_points).type(torch.FloatTensor).cuda()
+
+
+def gumbel_sample_2d(pdf, beta=1/(128*128)):
+    from torch.distributions.gumbel import Gumbel
+    noise = Gumbel(torch.zeros(size=pdf.shape), beta * torch.ones(size=pdf.shape)).sample().cuda()
+    pdf = pdf / pdf.sum(dim=2, keepdim=True).sum(dim=3, keepdim=True)
+    pdf = pdf + noise
+    max_points = pdf.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
     return pdf * (pdf == max_points).type(torch.FloatTensor).cuda()
 
 
@@ -204,8 +193,8 @@ class RealToCategorical(nn.Module):
         self.z = z
         self.k = k
         self.kernel = kernel
-        rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
-        self.rho = torch.nn.Parameter(rho)
+        self.rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
+        #self.rho = torch.nn.Parameter(self.rho)
         # For fixed particle positions
         #self.rho = rho
 
@@ -213,11 +202,15 @@ class RealToCategorical(nn.Module):
         self.eta = torch.nn.Parameter(torch.ones(self.z).cuda())
         self.ksi = torch.nn.Parameter(torch.ones(self.z).cuda())
         self.cuda()
-        #self.register_backward_hook(self.hook)
+        self.register_backward_hook(self.hook)
 
     def hook(self, *args):
-        print(self.eta)
-        print(self.rho)
+        #print(self.eta)
+        #print(self.ksi)
+        #print(self.rho)
+        for i in range(1, self.k):
+            self.rho.data[:, i] = torch.max(self.rho.data[:, i-1] + .001, self.rho.data[:, i])
+
 
     def forward(self, x):
         # x is a real-valued tensor size (batch, Z)
@@ -420,8 +413,7 @@ def main():
             # MSE loss but weighted toward foreground pixels
             error_mask = torch.mean((expected - predicted) ** 2, dim=1)
             foreground_mask = torch.mean(blur(expected), dim=1)
-            #theta = (train_iter / train_iters)
-            theta = 0
+            theta = (train_iter / train_iters)
             error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
             rec_loss = torch.mean(error_mask)
 
