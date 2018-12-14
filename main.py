@@ -57,7 +57,7 @@ class Encoder(nn.Module):
         self.fc1 = nn.Linear(8*16*16, 128)
         self.bn1 = nn.BatchNorm1d(128)
         self.fc2 = nn.Linear(128, latent_size)
-        self.fc2.weight.data.normal_(0, .1)
+        #self.fc2.weight.data.normal_(0, .1)
 
         # Bxlatent_size
         self.cuda()
@@ -94,12 +94,12 @@ class Decoder(nn.Module):
         self.to_categorical = RealToCategorical(z=latent_size//2, k=k)
 
         # Separable convolutions
-        self.places_conv1 = nn.ConvTranspose2d(num_places, num_places*3, kernel_size=5, padding=2, groups=num_places, bias=False)
+        self.places_conv1 = nn.ConvTranspose2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
         # Hack: input is just one single pixel, so scale weights by the square of kernel size
-        self.places_conv1.weight.data *= 5*5
-        self.places_conv2 = nn.ConvTranspose2d(num_places*3, num_places*3, kernel_size=5, padding=2, groups=num_places, bias=False)
+        #self.places_conv1.weight.data *= 5*5
+        self.places_conv2 = nn.ConvTranspose2d(num_places*16, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
         #self.places_conv2.weight.data *= 5*5
-        self.to_rgb = nn.ConvTranspose2d(3, 3, kernel_size=3, padding=1, bias=False)
+        self.to_rgb = nn.ConvTranspose2d(16, 3, kernel_size=3, padding=1, bias=False)
 
         self.things_fc1 = nn.Linear(self.latent_size//2, 128)
         self.things_bn1 = nn.BatchNorm1d(128)
@@ -124,37 +124,50 @@ class Decoder(nn.Module):
         for i in range(0, num_places):
             horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
             # Sample from horiz and from vert to select a spatial point
-            #horiz = gumbel_sample_1d(horiz)
-            #vert = gumbel_sample_1d(vert)
+            horiz = gumbel_sample_1d(horiz)
+            vert = gumbel_sample_1d(vert)
             places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
 
         # Normalize to disincentivize overlap among position distributions
-        places = places / (places.mean() + places.sum(dim=1, keepdim=True))
+        #places = places / (places.mean() + places.sum(dim=1, keepdim=True))
 
         if visual_tag:
             cap = 'Places min {:.03f} max {:.03f}'.format(places.min(), places.max())
             imutil.show(places[0] / places[0].max(), filename='visual_places_{}.png'.format(visual_tag),
                         resize_to=(512,512), caption=cap, img_padding=8)
+        sampled_points = places
 
+        """
         # Sample a location
-        places = gumbel_sample_2d(places)
+        sampled_points = gumbel_sample_2d(places)
+        sampled_points = sampled_points / sampled_points.max()
+        if visual_tag:
+            scatter = (sampled_points[:1] != 0)
+            import pdb; pdb.set_trace()
+            for _ in range(100):
+                scatter += (gumbel_sample_2d(places[:1]) != 0)
+            cap = 'Scatter min {:.03f} max {:.03f}'.format(scatter.min(), scatter.max())
+            imutil.show(scatter[0] / scatter[0].max(), filename='visual_scatter_{}.png'.format(visual_tag),
+                        resize_to=(512,512), caption=cap, img_padding=8)
+        """
 
         # Apply separable convolutions to draw one "thing" at each sampled location
-        x = self.places_conv1(places)
+        x = self.places_conv1(sampled_points)
         x = F.leaky_relu(x, 0.2)
         x = self.places_conv2(x)
         x = F.leaky_relu(x, 0.2)
-        x = x.view(batch_size, -1, 3, 64, 64)
+        x = x.view(batch_size, -1, 16, 64, 64)
         if visual_tag:
             cap = 'Things min {:.03f} max {:.03f}'.format(x.min(), x.max())
             things_vis = []
             for i in range(num_places):
-                things_vis.append(self.to_rgb(x[:,i])[0].unsqueeze(0))
+                things_vis.append(torch.sigmoid(self.to_rgb(x[:,i])[0].unsqueeze(0)))
             imutil.show(torch.cat(things_vis), filename='the_things_{}.png'.format(visual_tag), resize_to=(128*8,128*8), caption=cap, font_size=8, img_padding=10)
 
         # Combine independent additive objects-in-locations
         x = x.sum(dim=1)
         x = self.to_rgb(x)
+
         # Throw some noise in for training gradient purposes
         x = x + x.new(x.shape).normal_(0, .01)
         return x
@@ -168,13 +181,23 @@ def gumbel_sample_1d(pdf, beta=.01):
     return pdf * (pdf == max_points).type(torch.FloatTensor).cuda()
 
 
-def gumbel_sample_2d(pdf, beta=1/(64*64)):
+def gumbel_sample_2d(pdf, beta=1.0):
+    batch_size, channels, height, width = pdf.shape
+    # Generate a density function (differentiable)
+    pdf_probs = pdf / pdf.sum(dim=2, keepdim=True).sum(dim=3, keepdim=True)
+
+    # Perform sampling (non-differentiable)
+    log_probs = F.log_softmax(pdf_probs.view(batch_size, channels, -1), dim=2).view(pdf.shape)
     from torch.distributions.gumbel import Gumbel
+    beta = 1 / (height*width)
     noise = Gumbel(torch.zeros(size=pdf.shape), beta * torch.ones(size=pdf.shape)).sample().cuda()
-    pdf = pdf / pdf.sum(dim=2, keepdim=True).sum(dim=3, keepdim=True)
-    pdf = pdf + noise
-    max_points = pdf.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
-    return pdf * (pdf == max_points).type(torch.FloatTensor).cuda()
+    log_probs += noise
+    max_values = log_probs.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
+    sampled_mask = (log_probs == max_values).type(torch.FloatTensor).cuda()
+
+    # Mask out all but the sampled values
+    pdf = pdf_probs * sampled_mask
+    return pdf
 
 
 class RealToCategorical(nn.Module):
@@ -220,7 +243,7 @@ class RealToCategorical(nn.Module):
         elif self.kernel == 'gaussian':
             kern = torch.exp(-distances**2)
         #kern = torch.einsum('bzk,z->bzk', [kern, self.gamma])
-        kern = kern * 10
+        kern = kern * 8
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
         return probs
@@ -432,6 +455,8 @@ def main():
             # loss += mmd_loss
 
         loss.backward()
+
+        ts.collect('rgb weight std.', decoder.to_rgb.weight.std())
 
         opt_enc.step()
         opt_dec.step()
