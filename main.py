@@ -128,25 +128,25 @@ class Decoder(nn.Module):
             #vert = gumbel_sample_1d(vert)
             places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
 
-        # Normalize to cover the whole space
-        #places = places / places.sum(dim=1, keepdim=True)
+        # Normalize to disincentivize overlap among position distributions
+        places = places / (places.mean() + places.sum(dim=1, keepdim=True))
 
         if visual_tag:
-            cap = 'Decoder normalized places'
+            cap = 'Places min {:.03f} max {:.03f}'.format(places.min(), places.max())
             imutil.show(places[0] / places[0].max(), filename='visual_places_{}.png'.format(visual_tag),
-                        resize_to=(256,256), caption=cap, img_padding=8)
+                        resize_to=(512,512), caption=cap, img_padding=8)
 
         # Sample a location
         places = gumbel_sample_2d(places)
 
-        # Apply separable convolutions to draw
+        # Apply separable convolutions to draw one "thing" at each sampled location
         x = self.places_conv1(places)
         x = F.leaky_relu(x, 0.2)
         x = self.places_conv2(x)
         x = F.leaky_relu(x, 0.2)
         x = x.view(batch_size, -1, 3, 64, 64)
         if visual_tag:
-            cap = 'Things range {:.03f}-{:.03f}'.format(x.min(), x.max())
+            cap = 'Things min {:.03f} max {:.03f}'.format(x.min(), x.max())
             things_vis = []
             for i in range(num_places):
                 things_vis.append(self.to_rgb(x[:,i])[0].unsqueeze(0))
@@ -155,7 +155,8 @@ class Decoder(nn.Module):
         # Combine independent additive objects-in-locations
         x = x.sum(dim=1)
         x = self.to_rgb(x)
-
+        # Throw some noise in for training gradient purposes
+        x = x + x.new(x.shape).normal_(0, .01)
         return x
 
 
@@ -167,7 +168,7 @@ def gumbel_sample_1d(pdf, beta=.01):
     return pdf * (pdf == max_points).type(torch.FloatTensor).cuda()
 
 
-def gumbel_sample_2d(pdf, beta=1/(128*128)):
+def gumbel_sample_2d(pdf, beta=1/(64*64)):
     from torch.distributions.gumbel import Gumbel
     noise = Gumbel(torch.zeros(size=pdf.shape), beta * torch.ones(size=pdf.shape)).sample().cuda()
     pdf = pdf / pdf.sum(dim=2, keepdim=True).sum(dim=3, keepdim=True)
@@ -200,16 +201,8 @@ class RealToCategorical(nn.Module):
 
         # Sharpness/scale parameter
         self.eta = torch.nn.Parameter(torch.ones(self.z).cuda())
-        self.ksi = torch.nn.Parameter(torch.ones(self.z).cuda())
+        self.gamma = torch.nn.Parameter(torch.ones(self.z).cuda())
         self.cuda()
-        self.register_backward_hook(self.hook)
-
-    def hook(self, *args):
-        #print(self.eta)
-        #print(self.ksi)
-        #print(self.rho)
-        for i in range(1, self.k):
-            self.rho.data[:, i] = torch.max(self.rho.data[:, i-1] + .001, self.rho.data[:, i])
 
 
     def forward(self, x):
@@ -226,7 +219,7 @@ class RealToCategorical(nn.Module):
             kern = eps / (eps + distances**2)
         elif self.kernel == 'gaussian':
             kern = torch.exp(-distances**2)
-        #kern = torch.einsum('bzk,z->bzk', [kern, self.ksi])
+        #kern = torch.einsum('bzk,z->bzk', [kern, self.gamma])
         kern = kern * 10
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
@@ -382,11 +375,14 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.01)
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
-        #timesteps = 1 + train_iter // 10000
-        timesteps = 1
+        timesteps = 1 + train_iter // 10000
         encoder.train()
         decoder.train()
         transition.train()
+        for model in (encoder, decoder, transition):
+            for child in model.children():
+                if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
+                    child.momentum = 0.1
 
         opt_enc.zero_grad()
         opt_dec.zero_grad()
@@ -445,6 +441,10 @@ def main():
         encoder.eval()
         decoder.eval()
         transition.eval()
+        for model in (encoder, decoder, transition):
+            for child in model.children():
+                if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
+                    child.momentum = 0
 
         if train_iter % 100 == 0:
             visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
@@ -496,9 +496,13 @@ def visualize_reconstruction(encoder, decoder, states, train_iter=0):
 def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, frames=120, img_size=800):
     # Create a "batch" containing copies of the same image, one per latent dimension
     ground_truth = states[:, 0]
+
+    # Hack
+    latent_dim //= 2
+
     for i in range(1, latent_dim):
         ground_truth[i] = ground_truth[0]
-    zt = encoder(ground_truth[:latent_dim])
+    zt = encoder(ground_truth)
     minval, maxval = decoder.to_categorical.rho.min(), decoder.to_categorical.rho.max()
 
     # Generate L videos, one per latent dimension
@@ -508,8 +512,8 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
             z_val = (frame_idx / frames) * (maxval - minval) + minval
             zt[z_idx, z_idx] = z_val
         output = torch.sigmoid(decoder(zt))
-        reconstructed = decoder(encoder(ground_truth[:1]))
-        output = torch.cat([ground_truth[:1], reconstructed, output], dim=0)
+        reconstructed = torch.sigmoid(decoder(encoder(ground_truth)))
+        output = torch.cat([ground_truth[:1], reconstructed[:1], output], dim=0)
         caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
         vid.write_frame(output, resize_to=(img_size,img_size), caption=caption, img_padding=8)
     vid.finish()
@@ -518,13 +522,13 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
 def visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter=0, timesteps=60, num_actions=4):
     start_time = time.time()
     print('Starting trajectory simulation for {} frames'.format(timesteps))
-    states, rewards, dones, actions = datasource.get_trajectories(batch_size=4, timesteps=timesteps)
+    states, rewards, dones, actions = datasource.get_trajectories(batch_size=64, timesteps=timesteps)
     states = torch.Tensor(states).cuda()
     vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:, 0])
     for t in range(timesteps):
         x_t = torch.sigmoid(decoder(z))
-        img = torch.cat((states[:, t], x_t), dim=3)
+        img = torch.cat((states[:, t][:4], x_t[:4]), dim=3)
         caption = 'Pred. t+{} a={}'.format(t, actions[:, t])
         vid.write_frame(img, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
         # Predict the next latent point
