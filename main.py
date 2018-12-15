@@ -116,8 +116,7 @@ class Decoder(nn.Module):
         # Compute places as ring of outer products, one place per latent dim
         x_cat = self.to_categorical(z_places)
         if visual_tag:
-            imutil.show(x_cat[0], font_size=8, resize_to=(self.k*10, self.latent_size),
-                        caption="Decoder categorical {}".format(visual_tag),
+            imutil.show(x_cat[0], font_size=8, resize_to=(self.k, self.latent_size),
                         filename='visual_to_cat_{}.png'.format(visual_tag))
 
         places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
@@ -126,9 +125,11 @@ class Decoder(nn.Module):
             horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
             places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
             # Sample from horiz and from vert to select a spatial point
-            horiz = gumbel_sample_1d(horiz)
-            vert = gumbel_sample_1d(vert)
+            horiz = gumbel_sample_1d(horiz, beta=1/64)
+            vert = gumbel_sample_1d(vert, beta=1/64)
             sampled_points[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
+
+        sampled_points *= 100
 
         # Disincentivize overlap among position distributions
         overlap_metric = torch.exp(places.sum(dim=1)).mean()
@@ -143,19 +144,6 @@ class Decoder(nn.Module):
             imutil.show(sampled_points[0] > 0, filename='visual_sampled_{}.png'.format(visual_tag),
                         resize_to=(512,512), caption=cap, img_padding=8)
 
-        """
-        # Sample a location
-        sampled_points = gumbel_sample_2d(places)
-        sampled_points = sampled_points / sampled_points.max()
-        if visual_tag:
-            scatter = (sampled_points[:1] != 0)
-            import pdb; pdb.set_trace()
-            for _ in range(100):
-                scatter += (gumbel_sample_2d(places[:1]) != 0)
-            cap = 'Scatter min {:.03f} max {:.03f}'.format(scatter.min(), scatter.max())
-            imutil.show(scatter[0] / scatter[0].max(), filename='visual_scatter_{}.png'.format(visual_tag),
-                        resize_to=(512,512), caption=cap, img_padding=8)
-        """
 
         # Apply separable convolutions to draw one "thing" at each sampled location
         x = self.places_conv1(sampled_points)
@@ -181,12 +169,12 @@ class Decoder(nn.Module):
         return x
 
 
-def gumbel_sample_1d(pdf, beta=.01):
+def gumbel_sample_1d(pdf, beta=1.0):
     from torch.distributions.gumbel import Gumbel
     noise = Gumbel(torch.zeros(size=pdf.shape), beta * torch.ones(size=pdf.shape)).sample().cuda()
-    pdf = pdf + noise
-    max_points = pdf.max(dim=1, keepdim=True)[0]
-    return pdf * (pdf == max_points).type(torch.FloatTensor).cuda()
+    log_pdf = torch.log(pdf) + noise
+    max_points = log_pdf.max(dim=1, keepdim=True)[0]
+    return pdf * (log_pdf == max_points).type(torch.FloatTensor).cuda()
 
 
 def gumbel_sample_2d(pdf, beta=1.0):

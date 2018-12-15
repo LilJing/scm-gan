@@ -67,8 +67,6 @@ def build_state(left_y, right_y, ball_x, ball_y, ball_velocity):
     ball_x = np.clip(ball_x, ball_size, GAME_SIZE - ball_size)
     ball_y = np.clip(ball_y, ball_size, GAME_SIZE - ball_size)
 
-    ball_y = 30
-
     # Blue left red right
     state[2, left_y - paddle_height:left_y + paddle_height,
                left_x - paddle_width: left_x + paddle_width] = 1
