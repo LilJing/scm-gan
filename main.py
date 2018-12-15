@@ -94,16 +94,18 @@ class Decoder(nn.Module):
         self.to_categorical = RealToCategorical(z=latent_size//2, k=k)
 
         # Separable convolutions
-        self.places_conv1 = nn.ConvTranspose2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
+        self.places_conv1 = nn.ConvTranspose2d(num_places, num_places, kernel_size=5, padding=2, groups=num_places, bias=False)
         # Hack: input is just one single pixel, so scale weights by the square of kernel size
         #self.places_conv1.weight.data *= 5*5
-        self.places_conv2 = nn.ConvTranspose2d(num_places*16, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
+        self.places_conv2 = nn.ConvTranspose2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
         #self.places_conv2.weight.data *= 5*5
         self.to_rgb = nn.ConvTranspose2d(16, 3, kernel_size=3, padding=1, bias=False)
 
         self.things_fc1 = nn.Linear(self.latent_size//2, 128)
         self.things_bn1 = nn.BatchNorm1d(128)
         self.things_fc2 = nn.Linear(128, num_places)
+
+        self.spatial_sample = SpatialSampler(k=k)
 
         self.cuda()
 
@@ -119,21 +121,10 @@ class Decoder(nn.Module):
             imutil.show(x_cat[0], font_size=8, resize_to=(self.k, self.latent_size),
                         filename='visual_to_cat_{}.png'.format(visual_tag))
 
-        places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
-        sampled_points = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
-        for i in range(0, num_places):
-            horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
-            places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
-            # Sample from horiz and from vert to select a spatial point
-            horiz = gumbel_sample_1d(horiz, beta=1/64)
-            vert = gumbel_sample_1d(vert, beta=1/64)
-            sampled_points[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
-
-        sampled_points *= 100
+        places, sampled_points = self.spatial_sample(x_cat)
 
         # Disincentivize overlap among position distributions
         overlap_metric = torch.exp(places.sum(dim=1)).mean()
-
         #places = places / (places.mean() + places.sum(dim=1, keepdim=True))
 
         if visual_tag:
@@ -141,7 +132,10 @@ class Decoder(nn.Module):
             imutil.show(places[0] / places[0].max(), filename='visual_places_{}.png'.format(visual_tag),
                         resize_to=(512,512), caption=cap, img_padding=8)
             cap = 'Samples min {:.03f} max {:.03f}'.format(sampled_points.min(), sampled_points.max())
-            imutil.show(sampled_points[0] > 0, filename='visual_sampled_{}.png'.format(visual_tag),
+            sample_map = sampled_points[0] > 0
+            for _ in range(20):
+                sample_map += self.spatial_sample(x_cat[:1])[1][0] > 0
+            imutil.show(sample_map, filename='visual_sampled_{}.png'.format(visual_tag),
                         resize_to=(512,512), caption=cap, img_padding=8)
 
 
@@ -167,6 +161,27 @@ class Decoder(nn.Module):
         if enable_aux_loss:
             return x, overlap_metric
         return x
+
+
+class SpatialSampler(nn.Module):
+    def __init__(self, k):
+        super().__init__()
+        self.k = k
+
+    def forward(self, x_cat):
+        batch_size, num_axes, k = x_cat.shape
+        num_places = num_axes // 2
+        self.places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
+        self.sampled_points = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
+        for i in range(0, num_places):
+            horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
+            self.places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
+            # Sample from horiz and from vert to select a spatial point
+            horiz = gumbel_sample_1d(horiz, beta=1/64)
+            vert = gumbel_sample_1d(vert, beta=1/64)
+            self.sampled_points[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
+        self.sampled_points *= 100
+        return self.places, self.sampled_points
 
 
 def gumbel_sample_1d(pdf, beta=1.0):
@@ -238,8 +253,8 @@ class RealToCategorical(nn.Module):
             kern = eps / (eps + distances**2)
         elif self.kernel == 'gaussian':
             kern = torch.exp(-distances**2)
-        #kern = torch.einsum('bzk,z->bzk', [kern, self.gamma])
-        kern = kern * 8
+        kern = torch.einsum('bzk,z->bzk', [kern, self.gamma])
+        #kern = kern * 8
         # Output is a category between 1 and K, for each of the Z real values
         probs = torch.softmax(kern, dim=2)
         return probs
@@ -425,15 +440,15 @@ def main():
             expected = states[:, t]
             predicted = torch.sigmoid(pred_logits)
             # MSE loss
-            #rec_loss = torch.mean((expected - predicted)**2)
+            rec_loss = torch.mean((expected - predicted)**2)
             # MSE loss but blurred to prevent pathological behavior
             #rec_loss = torch.mean((blur(expected) - blur(predicted))**2)
             # MSE loss but weighted toward foreground pixels
-            error_mask = torch.mean((expected - predicted) ** 2, dim=1)
-            foreground_mask = torch.mean(blur(expected), dim=1)
-            theta = (train_iter / train_iters)
-            error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
-            rec_loss = torch.mean(error_mask)
+            #error_mask = torch.mean((expected - predicted) ** 2, dim=1)
+            #foreground_mask = torch.mean(blur(expected), dim=1)
+            #theta = (train_iter / train_iters)
+            #error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
+            #rec_loss = torch.mean(error_mask)
 
             ts.collect('Recon. t={}'.format(t), rec_loss)
             loss += rec_loss
