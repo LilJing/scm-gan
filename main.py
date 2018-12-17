@@ -97,16 +97,16 @@ class Decoder(nn.Module):
 
         # Separable convolutions
         self.pad_conv1 = nn.ReflectionPad2d(2)
-        self.places_conv1 = nn.Conv2d(num_places, num_places, kernel_size=5, groups=num_places, bias=False)
+        self.places_conv1 = nn.Conv2d(num_places, num_places*16, kernel_size=5, groups=num_places, bias=False)
         self.pad_conv2 = nn.ReflectionPad2d(2)
-        self.places_conv2 = nn.Conv2d(num_places, num_places*16, kernel_size=5, groups=num_places, bias=False)
+        self.places_conv2 = nn.Conv2d(num_places*16, num_places*16, kernel_size=5, groups=num_places, bias=False)
         self.to_rgb = nn.ConvTranspose2d(num_places*16, num_places*3, groups=num_places, kernel_size=3, padding=1, bias=False)
 
         # Test: just RGB
         #self.to_rgb = nn.ConvTranspose2d(num_places, num_places*3, groups=num_places, kernel_size=5, padding=2, bias=False)
         #self.to_rgb.weight.data = torch.abs(self.to_rgb.weight.data)
 
-        self.things_fc1 = nn.Linear(self.latent_size//2, num_places)
+        self.things_fc1 = nn.Linear(self.latent_size//2, num_places*16)
 
         #self.spatial_sample = SpatialSampler(k=k)
         self.spatial_sample = SpatialCoordToMap(k=k, z=latent_size)
@@ -140,16 +140,14 @@ class Decoder(nn.Module):
 
         # Apply separable convolutions to draw one "thing" at each sampled location
         x = places
-
-        # Also append non-location-specific information
-        zx = self.things_fc1(z_things)
-        zx = torch.tanh(zx)
-
-        x = x * zx.unsqueeze(2).unsqueeze(3)
-
-
         x = self.pad_conv1(x)
         x = self.places_conv1(x)
+
+        # Append non-location-specific information
+        zx = self.things_fc1(z_things)
+        zx = torch.tanh(zx)
+        x = x * zx.unsqueeze(2).unsqueeze(3)
+
         x = F.leaky_relu(x, 0.2)
         x = self.pad_conv2(x)
         x = self.places_conv2(x)
@@ -419,7 +417,7 @@ def norm(x):
 
 def main():
     batch_size = 64
-    latent_dim = 16
+    latent_dim = 32
     true_latent_dim = 4
     num_actions = 4
     train_iters = 100 * 1000
@@ -443,8 +441,7 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.01)
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
-        #timesteps = 1 + train_iter // 10000
-        timesteps = 1
+        timesteps = 1 + train_iter // 10000
         encoder.train()
         decoder.train()
         transition.train()
