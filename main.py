@@ -96,12 +96,15 @@ class Decoder(nn.Module):
         self.to_categorical = RealToCategorical(z=latent_size//2, k=k)
 
         # Separable convolutions
-        self.places_conv1 = nn.ConvTranspose2d(num_places, num_places, kernel_size=5, padding=2, groups=num_places, bias=False)
-        # Hack: input is just one single pixel, so scale weights by the square of kernel size
-        #self.places_conv1.weight.data *= 5*5
-        self.places_conv2 = nn.ConvTranspose2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
-        #self.places_conv2.weight.data *= 5*5
+        self.pad_conv1 = nn.ReflectionPad2d(2)
+        self.places_conv1 = nn.Conv2d(num_places, num_places, kernel_size=5, groups=num_places, bias=False)
+        self.pad_conv2 = nn.ReflectionPad2d(2)
+        self.places_conv2 = nn.Conv2d(num_places, num_places*16, kernel_size=5, groups=num_places, bias=False)
         self.to_rgb = nn.ConvTranspose2d(num_places*16, num_places*3, groups=num_places, kernel_size=3, padding=1, bias=False)
+
+        # Test: just RGB
+        #self.to_rgb = nn.ConvTranspose2d(num_places, num_places*3, groups=num_places, kernel_size=5, padding=2, bias=False)
+        #self.to_rgb.weight.data = torch.abs(self.to_rgb.weight.data)
 
         self.things_fc1 = nn.Linear(self.latent_size//2, 128)
         self.things_bn1 = nn.BatchNorm1d(128)
@@ -138,8 +141,11 @@ class Decoder(nn.Module):
                         resize_to=(512,512), caption=cap, img_padding=8)
 
         # Apply separable convolutions to draw one "thing" at each sampled location
-        x = self.places_conv1(places)
+        x = places
+        x = self.pad_conv1(x)
+        x = self.places_conv1(x)
         x = F.leaky_relu(x, 0.2)
+        x = self.pad_conv2(x)
         x = self.places_conv2(x)
         x = F.leaky_relu(x, 0.2)
         x = self.to_rgb(x)
@@ -188,17 +194,17 @@ class SpatialCoordToMap(nn.Module):
         self.k = k
         self.z = z
         self.num_places = z // 4
+        self.gamma = nn.Parameter(torch.ones(1).cuda())
 
     def forward(self, x_cat):
         batch_size, num_axes, k = x_cat.shape
         num_places = num_axes // 2
-        self.places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
-        self.places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
+        places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
         for i in range(0, num_places):
             horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
-            self.places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
-            self.places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
-        return self.places
+            places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
+        #places = places ** self.gamma
+        return places
 
 
 def gumbel_sample_1d(pdf, beta=1.0):
@@ -240,7 +246,7 @@ class RealToCategorical(nn.Module):
         11111111111111
         11111111000000
     """
-    def __init__(self, z, k, kernel='gaussian'):
+    def __init__(self, z, k, kernel='inverse_multiquadratic'):
         super().__init__()
         self.z = z
         self.k = k
@@ -266,14 +272,15 @@ class RealToCategorical(nn.Module):
         distances = torch.einsum('bzk,z->bzk', [distances, self.eta])
         # IMQ kernel
         if self.kernel == 'inverse_multiquadratic':
-            eps = .001
+            eps = .1
             kern = eps / (eps + distances**2)
         elif self.kernel == 'gaussian':
             kern = torch.exp(-distances**2)
-        kern = torch.einsum('bzk,z->bzk', [kern, self.gamma])
+        #kern = torch.einsum('bzk,z->bzk', [kern, self.gamma])
         #kern = kern * 8
         # Output is a category between 1 and K, for each of the Z real values
-        probs = torch.softmax(kern, dim=2)
+        #probs = kern / kern.sum(dim=2, keepdim=True)
+        probs = torch.softmax(kern * 10, dim=2)
         return probs
 
 
