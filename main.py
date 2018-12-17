@@ -17,6 +17,7 @@ import imutil
 from logutil import TimeSeries
 from tqdm import tqdm
 from spatial_recurrent import CSRN
+from coordconv import CoordConv2d
 
 from higgins import higgins_metric
 
@@ -48,15 +49,15 @@ class Encoder(nn.Module):
         self.latent_size = latent_size
         self.k = k
         # Bx1x64x64
-        self.conv1 = nn.Conv2d(3, 8, 4, stride=2, padding=1)
-        self.bn_conv1 = nn.BatchNorm2d(8)
+        self.conv1 = CoordConv2d(3 + 2, 32, 4, stride=2, padding=1)
+        self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.Conv2d(8, 8, 4, stride=2, padding=1)
-        self.bn_conv2 = nn.BatchNorm2d(8)
+        self.conv2 = CoordConv2d(32 + 2, 32, 4, stride=2, padding=1)
+        self.bn_conv2 = nn.BatchNorm2d(32)
 
-        self.fc1 = nn.Linear(8*16*16, 128)
-        self.bn1 = nn.BatchNorm1d(128)
-        self.fc2 = nn.Linear(128, latent_size)
+        self.fc1 = nn.Linear(8*16*16, 256)
+        self.bn1 = nn.BatchNorm1d(256)
+        self.fc2 = nn.Linear(256, latent_size)
         #self.fc2.weight.data.normal_(0, .1)
 
         # Bxlatent_size
@@ -64,6 +65,8 @@ class Encoder(nn.Module):
 
     def forward(self, x, visual_tag=None):
         # Input: B x 1 x 64 x 64
+        batch_size, channels, height, width = x.shape
+
         x = self.conv1(x)
         x = self.bn_conv1(x)
         x = F.leaky_relu(x)
@@ -99,13 +102,15 @@ class Decoder(nn.Module):
         #self.places_conv1.weight.data *= 5*5
         self.places_conv2 = nn.ConvTranspose2d(num_places, num_places*16, kernel_size=5, padding=2, groups=num_places, bias=False)
         #self.places_conv2.weight.data *= 5*5
-        self.to_rgb = nn.ConvTranspose2d(16, 3, kernel_size=3, padding=1, bias=False)
+        self.to_rgb = nn.ConvTranspose2d(num_places*16, num_places*3, groups=num_places, kernel_size=3, padding=1, bias=False)
 
         self.things_fc1 = nn.Linear(self.latent_size//2, 128)
         self.things_bn1 = nn.BatchNorm1d(128)
         self.things_fc2 = nn.Linear(128, num_places)
 
         self.spatial_sample = SpatialSampler(k=k)
+
+        self.background = torch.nn.Parameter(torch.ones(3).cuda())
 
         self.cuda()
 
@@ -144,20 +149,15 @@ class Decoder(nn.Module):
         x = F.leaky_relu(x, 0.2)
         x = self.places_conv2(x)
         x = F.leaky_relu(x, 0.2)
-        x = x.view(batch_size, -1, 16, 64, 64)
+        x = self.to_rgb(x)
+        x = x.view(batch_size, num_places, 3, 64, 64)
         if visual_tag:
             cap = 'Things min {:.03f} max {:.03f}'.format(x.min(), x.max())
-            things_vis = []
-            for i in range(num_places):
-                things_vis.append(torch.sigmoid(self.to_rgb(x[:,i])[0].unsqueeze(0)))
-            imutil.show(torch.cat(things_vis), filename='the_things_{}.png'.format(visual_tag), resize_to=(128*8,128*8), caption=cap, font_size=8, img_padding=10)
+            imutil.show(x[0], filename='the_things_{}.png'.format(visual_tag), resize_to=(128*8,128*8), caption=cap, font_size=8, img_padding=10)
 
         # Combine independent additive objects-in-locations
         x = x.sum(dim=1)
-        x = self.to_rgb(x)
 
-        # Throw some noise in for training gradient purposes
-        x = x + x.new(x.shape).normal_(0, .01)
         if enable_aux_loss:
             return x, overlap_metric
         return x
@@ -388,7 +388,7 @@ def norm(x):
 
 def main():
     batch_size = 64
-    latent_dim = 64
+    latent_dim = 16
     true_latent_dim = 4
     num_actions = 4
     train_iters = 100 * 1000
@@ -412,7 +412,8 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.01)
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
-        timesteps = 1 + train_iter // 10000
+        #timesteps = 1 + train_iter // 10000
+        timesteps = 1
         encoder.train()
         decoder.train()
         transition.train()
@@ -441,7 +442,8 @@ def main():
             loss += aux_loss
 
             expected = states[:, t]
-            predicted = torch.sigmoid(pred_logits)
+            #predicted = torch.sigmoid(pred_logits)
+            predicted = pred_logits
             # MSE loss
             #rec_loss = torch.mean((expected - predicted)**2)
             # MSE loss but blurred to prevent pathological behavior
@@ -527,7 +529,8 @@ def visualize_reconstruction(encoder, decoder, states, train_iter=0):
     ground_truth = states[:, 0]
     tag = 'iter_{:06d}'.format(train_iter // 1000 * 1000)
     logits = decoder(encoder(ground_truth, visual_tag=tag), visual_tag=tag)
-    reconstructed = torch.sigmoid(logits)
+    #reconstructed = torch.sigmoid(logits)
+    reconstructed = logits
     img = torch.cat((ground_truth[:4], reconstructed[:4]), dim=3)
     caption = 'D(E(x)) iter {}'.format(train_iter)
     imutil.show(img, resize_to=(640, 360), img_padding=4,
@@ -553,8 +556,10 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
         for z_idx in range(latent_dim):
             z_val = (frame_idx / frames) * (maxval - minval) + minval
             zt[z_idx, z_idx] = z_val
-        output = torch.sigmoid(decoder(zt))
-        reconstructed = torch.sigmoid(decoder(encoder(ground_truth)))
+        #output = torch.sigmoid(decoder(zt))
+        output = decoder(zt)
+        #reconstructed = torch.sigmoid(decoder(encoder(ground_truth)))
+        reconstructed = decoder(encoder(ground_truth))
         output = torch.cat([ground_truth[:1], reconstructed[:1], output], dim=0)
         caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
         vid.write_frame(output, resize_to=(img_size,img_size), caption=caption, img_padding=8)
@@ -569,7 +574,8 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
     vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:, 0])
     for t in range(timesteps):
-        x_t = torch.sigmoid(decoder(z))
+        #x_t = torch.sigmoid(decoder(z))
+        x_t = decoder(z)
         img = torch.cat((states[:, t][:4], x_t[:4]), dim=3)
         caption = 'Pred. t+{} a={}'.format(t, actions[:4, t])
         vid.write_frame(img, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
