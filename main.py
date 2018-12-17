@@ -44,10 +44,9 @@ class Transition(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, latent_size, k=64):
+    def __init__(self, latent_size):
         super().__init__()
         self.latent_size = latent_size
-        self.k = k
         # Bx1x64x64
         self.conv1 = CoordConv2d(3 + 2, 32, 4, stride=2, padding=1)
         self.bn_conv1 = nn.BatchNorm2d(32)
@@ -55,7 +54,7 @@ class Encoder(nn.Module):
         self.conv2 = CoordConv2d(32 + 2, 32, 4, stride=2, padding=1)
         self.bn_conv2 = nn.BatchNorm2d(32)
 
-        self.fc1 = nn.Linear(8*16*16, 256)
+        self.fc1 = nn.Linear(32*16*16, 256)
         self.bn1 = nn.BatchNorm1d(256)
         self.fc2 = nn.Linear(256, latent_size)
         #self.fc2.weight.data.normal_(0, .1)
@@ -75,7 +74,7 @@ class Encoder(nn.Module):
         x = self.bn_conv2(x)
         x = F.leaky_relu(x)
 
-        x = x.view(-1, 8*16*16)
+        x = x.view(-1, 32*16*16)
         x = self.fc1(x)
         x = self.bn1(x)
         x = F.leaky_relu(x)
@@ -108,9 +107,8 @@ class Decoder(nn.Module):
         self.things_bn1 = nn.BatchNorm1d(128)
         self.things_fc2 = nn.Linear(128, num_places)
 
-        self.spatial_sample = SpatialSampler(k=k)
-
-        self.background = torch.nn.Parameter(torch.ones(3).cuda())
+        #self.spatial_sample = SpatialSampler(k=k)
+        self.spatial_sample = SpatialCoordToMap(k=k, z=latent_size)
 
         self.cuda()
 
@@ -126,7 +124,9 @@ class Decoder(nn.Module):
             imutil.show(x_cat[0], font_size=8, resize_to=(self.k, self.latent_size),
                         filename='visual_to_cat_{}.png'.format(visual_tag))
 
-        places, sampled_points = self.spatial_sample(x_cat)
+        #places, sampled_points = self.spatial_sample(x_cat)
+        #sample_from = sampled_points / (sampled_points.sum(dim=3, keepdim=True).sum(dim=2, keepdim=True))
+        places = self.spatial_sample(x_cat)
 
         # Disincentivize overlap among position distributions
         overlap_metric = torch.exp(places.sum(dim=1)).mean()
@@ -136,16 +136,9 @@ class Decoder(nn.Module):
             cap = 'Places min {:.03f} max {:.03f}'.format(places.min(), places.max())
             imutil.show(places[0] / places[0].max(), filename='visual_places_{}.png'.format(visual_tag),
                         resize_to=(512,512), caption=cap, img_padding=8)
-            cap = 'Samples min {:.03f} max {:.03f}'.format(sampled_points.min(), sampled_points.max())
-            sample_map = sampled_points[0] > 0
-            for _ in range(20):
-                sample_map += self.spatial_sample(x_cat[:1])[1][0] > 0
-            imutil.show(sample_map, filename='visual_sampled_{}.png'.format(visual_tag),
-                        resize_to=(512,512), caption=cap, img_padding=8)
-
 
         # Apply separable convolutions to draw one "thing" at each sampled location
-        x = self.places_conv1(sampled_points)
+        x = self.places_conv1(places)
         x = F.leaky_relu(x, 0.2)
         x = self.places_conv2(x)
         x = F.leaky_relu(x, 0.2)
@@ -163,6 +156,8 @@ class Decoder(nn.Module):
         return x
 
 
+# Input: categorical estimates of x and y coordinates
+# Output: 2d feature maps with all but one pixel masked to zero
 class SpatialSampler(nn.Module):
     def __init__(self, k):
         super().__init__()
@@ -185,6 +180,25 @@ class SpatialSampler(nn.Module):
         self.sampled_points *= 100
         self.t += 1
         return self.places, self.sampled_points
+
+
+class SpatialCoordToMap(nn.Module):
+    def __init__(self, k, z):
+        super().__init__()
+        self.k = k
+        self.z = z
+        self.num_places = z // 4
+
+    def forward(self, x_cat):
+        batch_size, num_axes, k = x_cat.shape
+        num_places = num_axes // 2
+        self.places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
+        self.places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
+        for i in range(0, num_places):
+            horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
+            self.places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
+            self.places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
+        return self.places
 
 
 def gumbel_sample_1d(pdf, beta=1.0):
