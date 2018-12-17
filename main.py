@@ -252,24 +252,25 @@ class RealToCategorical(nn.Module):
         self.k = k
         self.kernel = kernel
         self.rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
+        # For learnable particle positions
         #self.rho = torch.nn.Parameter(self.rho)
-        # For fixed particle positions
-        #self.rho = rho
 
         # Sharpness/scale parameter
-        self.eta = torch.nn.Parameter(torch.ones(self.z).cuda())
+        self.eta = torch.nn.Parameter(torch.zeros(self.z).cuda())
         self.gamma = torch.nn.Parameter(torch.ones(self.z).cuda())
+        self.register_backward_hook(self.clamp_weights)
         self.cuda()
 
 
     def forward(self, x):
         # x is a real-valued tensor size (batch, Z)
         batch_size = len(x)
+        x = torch.tanh(x)
         # Broadcast x to (batch, Z, K)
         perceived_locations = x.unsqueeze(-1).repeat(1, 1, self.k)
         reference_locations = self.rho.unsqueeze(0).repeat(batch_size, 1, 1)
         distances = (perceived_locations - reference_locations)
-        distances = torch.einsum('bzk,z->bzk', [distances, self.eta])
+        distances = torch.einsum('bzk,z->bzk', [distances, torch.exp(self.eta)])
         # IMQ kernel
         if self.kernel == 'inverse_multiquadratic':
             eps = .1
@@ -280,8 +281,11 @@ class RealToCategorical(nn.Module):
         #kern = kern * 8
         # Output is a category between 1 and K, for each of the Z real values
         #probs = kern / kern.sum(dim=2, keepdim=True)
-        probs = torch.softmax(kern * 10, dim=2)
+        probs = torch.softmax(kern, dim=2) + torch.softmax(kern*1000, dim=2)
         return probs
+
+    def clamp_weights(self, *args):
+        self.eta.data.clamp_(min=-2, max=+2)
 
 
 # https://discuss.pytorch.org/t/is-there-anyway-to-do-gaussian-filtering-for-an-image-2d-3d-in-pytorch/12351/8
