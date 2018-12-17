@@ -106,9 +106,7 @@ class Decoder(nn.Module):
         #self.to_rgb = nn.ConvTranspose2d(num_places, num_places*3, groups=num_places, kernel_size=5, padding=2, bias=False)
         #self.to_rgb.weight.data = torch.abs(self.to_rgb.weight.data)
 
-        self.things_fc1 = nn.Linear(self.latent_size//2, 128)
-        self.things_bn1 = nn.BatchNorm1d(128)
-        self.things_fc2 = nn.Linear(128, num_places)
+        self.things_fc1 = nn.Linear(self.latent_size//2, num_places)
 
         #self.spatial_sample = SpatialSampler(k=k)
         self.spatial_sample = SpatialCoordToMap(k=k, z=latent_size)
@@ -142,6 +140,14 @@ class Decoder(nn.Module):
 
         # Apply separable convolutions to draw one "thing" at each sampled location
         x = places
+
+        # Also append non-location-specific information
+        zx = self.things_fc1(z_things)
+        zx = torch.tanh(zx)
+
+        x = x * zx.unsqueeze(2).unsqueeze(3)
+
+
         x = self.pad_conv1(x)
         x = self.places_conv1(x)
         x = F.leaky_relu(x, 0.2)
