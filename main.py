@@ -167,6 +167,7 @@ class SpatialSampler(nn.Module):
     def __init__(self, k):
         super().__init__()
         self.k = k
+        self.t = 0
 
     def forward(self, x_cat):
         batch_size, num_axes, k = x_cat.shape
@@ -177,10 +178,12 @@ class SpatialSampler(nn.Module):
             horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
             self.places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
             # Sample from horiz and from vert to select a spatial point
-            horiz = gumbel_sample_1d(horiz, beta=1/64)
-            vert = gumbel_sample_1d(vert, beta=1/64)
+            beta = .1 + .1 * np.sin(self.t / 1000)
+            horiz = gumbel_sample_1d(horiz, beta=beta)
+            vert = gumbel_sample_1d(vert, beta=beta)
             self.sampled_points[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
         self.sampled_points *= 100
+        self.t += 1
         return self.places, self.sampled_points
 
 
@@ -440,15 +443,15 @@ def main():
             expected = states[:, t]
             predicted = torch.sigmoid(pred_logits)
             # MSE loss
-            rec_loss = torch.mean((expected - predicted)**2)
+            #rec_loss = torch.mean((expected - predicted)**2)
             # MSE loss but blurred to prevent pathological behavior
             #rec_loss = torch.mean((blur(expected) - blur(predicted))**2)
             # MSE loss but weighted toward foreground pixels
-            #error_mask = torch.mean((expected - predicted) ** 2, dim=1)
-            #foreground_mask = torch.mean(blur(expected), dim=1)
-            #theta = (train_iter / train_iters)
-            #error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
-            #rec_loss = torch.mean(error_mask)
+            error_mask = torch.mean((expected - predicted) ** 2, dim=1)
+            foreground_mask = torch.mean(blur(expected), dim=1)
+            theta = (train_iter / train_iters)
+            error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
+            rec_loss = torch.mean(error_mask)
 
             ts.collect('Recon. t={}'.format(t), rec_loss)
             loss += rec_loss
