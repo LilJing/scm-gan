@@ -14,6 +14,9 @@ ball_size = 2
 left_x = 4
 right_x = GAME_SIZE - 4
 
+MARGIN = 4
+X_MARGIN = 5
+
 dataset = None
 def init():
     global dataset
@@ -26,10 +29,10 @@ class MinipongEnv():
         self.action_space = Discrete(4)
 
     def reset(self):
-        self.left_y = np.random.randint(0, 64)
-        self.right_y = np.random.randint(0, 64)
-        self.ball_x = np.random.randint(0, 64)
-        self.ball_y = np.random.randint(0, 64)
+        self.left_y = np.random.randint(MARGIN, 64 - MARGIN)
+        self.right_y = np.random.randint(MARGIN, 64 - MARGIN)
+        self.ball_x = np.random.randint(0 + X_MARGIN, 64 - X_MARGIN)
+        self.ball_y = np.random.randint(0 + MARGIN, 64 - MARGIN)
         self.ball_velocity_x = random.choice([-2, +2])
         self.ball_velocity_y = random.choice([-2, +2])
         self.state = build_state(self.left_y, self.right_y, self.ball_x, self.ball_y, self.ball_velocity_x, self.ball_velocity_y)
@@ -51,11 +54,11 @@ class MinipongEnv():
         self.ball_x += self.ball_velocity_x
         self.ball_y += self.ball_velocity_y
 
-        #if self.ball_x >= GAME_SIZE - 5 and self.ball_velocity > 0 and self.right_y - paddle_height <= self.ball_y <= self.right_y + paddle_height:
-        if self.ball_x >= GAME_SIZE - 5 and self.ball_velocity_x > 0:
+        #if self.ball_x >= GAME_SIZE - 6 and self.ball_velocity_x > 0:
+        if self.ball_x >= GAME_SIZE - 6 and self.ball_velocity_x > 0 and self.right_y - paddle_height <= self.ball_y <= self.right_y + paddle_height:
             self.ball_velocity_x *= -1
-        #if self.ball_x <= 5 and self.ball_velocity < 0 and self.left_y - paddle_height <= self.ball_y <= self.left_y + paddle_height:
-        if self.ball_x <= 5 and self.ball_velocity_x < 0:
+        #if self.ball_x <= 6 and self.ball_velocity_x < 0:
+        if self.ball_x <= 6 and self.ball_velocity_x < 0 and self.left_y - paddle_height <= self.ball_y <= self.left_y + paddle_height:
             self.ball_velocity_x *= -1
 
         if self.ball_y >= GAME_SIZE - 1 and self.ball_velocity_y > 0:
