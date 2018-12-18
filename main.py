@@ -136,7 +136,7 @@ class Decoder(nn.Module):
         if visual_tag:
             cap = 'Places min {:.03f} max {:.03f}'.format(places.min(), places.max())
             imutil.show(places[0] / places[0].max(), filename='visual_places_{}.png'.format(visual_tag),
-                        resize_to=(512,512), caption=cap, img_padding=8)
+                        resize_to=(512, 512), caption=cap, img_padding=8)
 
         # Apply separable convolutions to draw one "thing" at each sampled location
         x = places
@@ -156,7 +156,8 @@ class Decoder(nn.Module):
         x = x.view(batch_size, num_places, 3, 64, 64)
         if visual_tag:
             cap = 'Things min {:.03f} max {:.03f}'.format(x.min(), x.max())
-            imutil.show(x[0], filename='the_things_{}.png'.format(visual_tag), resize_to=(128*8,128*8), caption=cap, font_size=8, img_padding=10)
+            imutil.show(x[0], filename='the_things_{}.png'.format(visual_tag),
+                        resize_to=(512,1024), caption=cap, font_size=8, img_padding=10)
 
         # Combine independent additive objects-in-locations
         x = x.sum(dim=1)
@@ -417,7 +418,7 @@ def norm(x):
 
 def main():
     batch_size = 64
-    latent_dim = 32
+    latent_dim = 12
     true_latent_dim = 4
     num_actions = 4
     train_iters = 100 * 1000
@@ -519,6 +520,10 @@ def main():
                     child.momentum = 0
 
         if train_iter % 100 == 0:
+            vis = ((expected - predicted)**2)[:1]
+            imutil.show(vis, filename='reconstruction_error.png')
+
+        if train_iter % 100 == 0:
             visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
 
         # Periodically generate latent space traversals
@@ -585,12 +590,12 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
             z_val = (frame_idx / frames) * (maxval - minval) + minval
             zt[z_idx, z_idx] = z_val
         #output = torch.sigmoid(decoder(zt))
-        output = decoder(zt)
+        output = decoder(zt)[:latent_dim]
         #reconstructed = torch.sigmoid(decoder(encoder(ground_truth)))
         reconstructed = decoder(encoder(ground_truth))
-        output = torch.cat([ground_truth[:1], reconstructed[:1], output], dim=0)
+        video_frame = torch.cat([ground_truth[:1], reconstructed[:1], output], dim=0)
         caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
-        vid.write_frame(output, resize_to=(img_size,img_size), caption=caption, img_padding=8)
+        vid.write_frame(video_frame, resize_to=(img_size,img_size), caption=caption, img_padding=8)
     vid.finish()
 
 
