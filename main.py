@@ -242,9 +242,6 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
     # Create a "batch" containing copies of the same image, one per latent dimension
     ground_truth = states[:, 0]
 
-    # Hack
-    latent_dim //= 2
-
     for i in range(1, latent_dim):
         ground_truth[i] = ground_truth[0]
     zt = encoder(ground_truth)
