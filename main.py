@@ -103,27 +103,54 @@ def main():
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
         decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-decoder.pth')))
         transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
+        discriminator.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-discriminator.pth')))
 
     # Train the autoencoder
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
-    opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.001)
+    opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
         timesteps = 1 + train_iter // 10000
+        theta = 0.1 + 0.9 * (train_iter / train_iters)
         encoder.train()
         decoder.train()
         transition.train()
-        for model in (encoder, decoder, transition):
+        discriminator.train()
+        for model in (encoder, decoder, transition, discriminator):
             for child in model.children():
                 if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
                     child.momentum = 0.1
 
+        # Train discriminator
+        states, rewards, dones, actions = datasource.get_trajectories(batch_size, 1)
+        states = torch.Tensor(states[:, 0]).cuda()
+        opt_disc.zero_grad()
+        real_scores = discriminator(states)
+        fake_scores = discriminator(decoder(encoder(states)))
+        real_loss = torch.mean(F.relu(1 - real_scores))
+        fake_loss = torch.mean(F.relu(1 + fake_scores))
+        ts.collect('D. real', real_loss)
+        ts.collect('D. fake', fake_loss)
+        disc_loss = real_loss + fake_loss
+        disc_loss.backward()
+        opt_disc.step()
+
+        # Train the rest of the network
         opt_enc.zero_grad()
         opt_dec.zero_grad()
         opt_trans.zero_grad()
-        opt_disc.zero_grad()
+
+        # Train decoder using discriminator
+        states, rewards, dones, actions = datasource.get_trajectories(batch_size, 1)
+        states = torch.Tensor(states[:, 0]).cuda()
+
+        if theta > .15:
+            fake_scores = discriminator(decoder(encoder(states)))
+            gen_loss = .0001 * theta * torch.mean(F.relu(1 - fake_scores))
+            ts.collect('D. gen', gen_loss)
+            gen_loss.backward()
 
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
         states = torch.Tensor(states).cuda()
@@ -150,7 +177,6 @@ def main():
             # MSE loss but weighted toward foreground pixels
             error_mask = torch.mean((expected - predicted) ** 2, dim=1)
             foreground_mask = torch.mean(blur(expected), dim=1)
-            theta = 0.1 + 0.9 * (train_iter / train_iters)
             error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
             rec_loss = torch.mean(error_mask)
 
@@ -184,7 +210,8 @@ def main():
         encoder.eval()
         decoder.eval()
         transition.eval()
-        for model in (encoder, decoder, transition):
+        discriminator.eval()
+        for model in (encoder, decoder, transition, discriminator):
             for child in model.children():
                 if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
                     child.momentum = 0
@@ -206,6 +233,7 @@ def main():
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
             torch.save(decoder.state_dict(), 'model-decoder.pth')
+            torch.save(discriminator.state_dict(), 'model-discriminator.pth')
 
         # Periodically generate simulations of the future
         if train_iter % 2000 == 0:

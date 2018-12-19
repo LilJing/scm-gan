@@ -77,17 +77,14 @@ class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
         # Bx1x64x64
-        self.conv1 = CoordConv2d(3 + 2, 32, 4, stride=2, padding=1)
+        self.conv1 = nn.Conv2d(3, 32, 1, stride=1, padding=0)
         self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = CoordConv2d(32 + 2, 32, 4, stride=2, padding=1)
+        self.conv2 = nn.Conv2d(32, 32, 1, stride=1, padding=0)
         self.bn_conv2 = nn.BatchNorm2d(32)
 
-        self.fc1 = nn.Linear(32*16*16, 256)
-        self.bn1 = nn.BatchNorm1d(256)
-        self.fc2 = nn.Linear(256, 1)
+        self.conv3 = nn.Conv2d(32, 1, 3, padding=1)
 
-        # Bxlatent_size
         self.cuda()
 
     def forward(self, x, visual_tag=None):
@@ -102,13 +99,8 @@ class Discriminator(nn.Module):
         x = self.bn_conv2(x)
         x = F.leaky_relu(x)
 
-        x = x.view(-1, 32*16*16)
-        x = self.fc1(x)
-        x = self.bn1(x)
-        x = F.leaky_relu(x)
-
-        x = self.fc2(x)
-        return x
+        x = self.conv3(x)
+        return x.sum(dim=-1).sum(dim=-1).sum(dim=-1)
 
 
 class Decoder(nn.Module):
