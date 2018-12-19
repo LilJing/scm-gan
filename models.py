@@ -163,7 +163,7 @@ class Decoder(nn.Module):
         places = self.spatial_map(x_cat)
 
         # Hack: disincentivize overlap among position distributions
-        #overlap_metric = torch.exp(places.sum(dim=1)).mean()
+        aux_loss = torch.mean(places.sum(dim=1)**2)
         #places = places / (places.mean() + places.sum(dim=1, keepdim=True))
 
         if visual_tag:
@@ -176,7 +176,6 @@ class Decoder(nn.Module):
         x_things = self.things_fc1(z_things)
         x_things = x_things.unsqueeze(1).unsqueeze(3).unsqueeze(4)
         x_things = x_things.repeat(1, num_places, 1, self.width, self.width)
-        x_things = x_things
 
         # Apply separable convolutions to draw one "thing" at each sampled location
         x_places = places.unsqueeze(2)
@@ -196,7 +195,6 @@ class Decoder(nn.Module):
             imutil.show(img, filename='the_things_{}.png'.format(visual_tag),
                         resize_to=(512, 1024), caption=cap, font_size=8, img_padding=10)
 
-        aux_loss = torch.mean(x ** 2)
         # Combine independent additive objects-in-locations
         x = x.sum(dim=1)
 

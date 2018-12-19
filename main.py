@@ -277,8 +277,8 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
         #x_t = torch.sigmoid(decoder(z))
         x_t = decoder(z)
         img = torch.cat((states[:, t][:4], x_t[:4]), dim=3)
-        caption = 'Pred. t+{} a={}'.format(t, actions[:4, t])
-        vid.write_frame(img, caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
+        caption = 'Pred. t+{} a={} min={:.2f} max={:.2f}'.format(t, actions[:4, t], img.min(), img.max())
+        vid.write_frame(img.clamp_(0,1), caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
         # Predict the next latent point
         onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
         z = transition(z, onehot_a)
