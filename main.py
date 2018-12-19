@@ -138,7 +138,7 @@ def main():
             ts.collect('logits min', pred_logits.min())
             ts.collect('logits max', pred_logits.max())
             ts.collect('aux loss', aux_loss)
-            #loss += aux_loss
+            loss += .0001 * aux_loss
 
             expected = states[:, t]
             #predicted = torch.sigmoid(pred_logits)
@@ -150,7 +150,7 @@ def main():
             # MSE loss but weighted toward foreground pixels
             error_mask = torch.mean((expected - predicted) ** 2, dim=1)
             foreground_mask = torch.mean(blur(expected), dim=1)
-            theta = (train_iter / train_iters)
+            theta = (train_iter + 6000 / train_iters)
             error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
             rec_loss = torch.mean(error_mask)
 

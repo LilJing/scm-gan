@@ -115,29 +115,32 @@ class Decoder(nn.Module):
     def __init__(self, latent_size, k=64, m=12):
         super().__init__()
         self.latent_size = latent_size
+        self.width = 64
         num_places = latent_size // 4
         # K is the number of buckets to use when discretizing
         self.k = k
         # M is the number of kinds of things that there can be
-        self.m = m
+        #self.m = m
 
         self.to_categorical = RealToCategorical(z=latent_size//2, k=k)
 
+        global_channels = num_places*4
+
         # Separable convolutions
         self.pad_conv1 = nn.ReflectionPad2d(2)
-        self.places_conv1 = nn.Conv2d(num_places, num_places*16, kernel_size=5, groups=num_places, bias=False)
-        self.pad_conv2 = nn.ReflectionPad2d(2)
-        self.places_conv2 = nn.Conv2d(num_places*16, num_places*16, kernel_size=5, groups=num_places, bias=False)
-        self.to_rgb = nn.ConvTranspose2d(num_places, num_places*3, groups=num_places, kernel_size=5, padding=2, bias=False)
+        #self.places_conv1 = nn.Conv2d(num_places, num_places*16, kernel_size=5, groups=num_places, bias=False)
+        #self.pad_conv2 = nn.ReflectionPad2d(2)
+        #self.places_conv2 = nn.Conv2d(num_places*16, num_places*16, kernel_size=5, groups=num_places, bias=False)
+        self.to_rgb = nn.Conv2d(num_places* (1 + global_channels), num_places*3, kernel_size=5, groups=num_places, bias=False)
 
         # Test: just RGB
         #self.to_rgb = nn.ConvTranspose2d(num_places, num_places*3, groups=num_places, kernel_size=5, padding=2, bias=False)
         #self.to_rgb.weight.data = torch.abs(self.to_rgb.weight.data)
 
-        self.things_fc1 = nn.Linear(self.latent_size//2, num_places*16)
 
+        self.things_fc1 = nn.Linear(self.latent_size//2, global_channels)
         #self.spatial_sample = SpatialSampler(k=k)
-        self.spatial_sample = SpatialCoordToMap(k=k, z=latent_size)
+        self.spatial_map = SpatialCoordToMap(k=k, z=latent_size)
 
         self.cuda()
 
@@ -153,12 +156,14 @@ class Decoder(nn.Module):
             imutil.show(x_cat[0], font_size=8, resize_to=(self.k, self.latent_size),
                         filename='visual_to_cat_{}.png'.format(visual_tag))
 
+        # Failed experiment: Sample stochastically from the distribution!
         #places, sampled_points = self.spatial_sample(x_cat)
         #sample_from = sampled_points / (sampled_points.sum(dim=3, keepdim=True).sum(dim=2, keepdim=True))
-        places = self.spatial_sample(x_cat)
 
-        # Disincentivize overlap among position distributions
-        overlap_metric = torch.exp(places.sum(dim=1)).mean()
+        places = self.spatial_map(x_cat)
+
+        # Hack: disincentivize overlap among position distributions
+        #overlap_metric = torch.exp(places.sum(dim=1)).mean()
         #places = places / (places.mean() + places.sum(dim=1, keepdim=True))
 
         if visual_tag:
@@ -166,31 +171,40 @@ class Decoder(nn.Module):
             imutil.show(places[0] / places[0].max(), filename='visual_places_{}.png'.format(visual_tag),
                         resize_to=(512, 512), caption=cap, img_padding=8)
 
-        # Apply separable convolutions to draw one "thing" at each sampled location
-        x = places
-        #x = self.pad_conv1(x)
-        #x = self.places_conv1(x)
 
-        # Append non-location-specific information
-        #zx = self.things_fc1(z_things)
-        #x = x * zx.unsqueeze(2).unsqueeze(3)
+        # Append non-location-specific information to each "place" channel
+        x_things = self.things_fc1(z_things)
+        x_things = x_things.unsqueeze(1).unsqueeze(3).unsqueeze(4)
+        x_things = x_things.repeat(1, num_places, 1, self.width, self.width)
+        x_things = x_things
+
+        # Apply separable convolutions to draw one "thing" at each sampled location
+        x_places = places.unsqueeze(2)
+        x = torch.cat([x_places, x_things], dim=2)
+        x = x.view(batch_size, -1, self.width, self.width)
 
         #x = F.leaky_relu(x, 0.2)
         #x = self.pad_conv2(x)
         #x = self.places_conv2(x)
         #x = F.leaky_relu(x, 0.2)
+        x = self.pad_conv1(x)
         x = self.to_rgb(x)
         x = x.view(batch_size, num_places, 3, 64, 64)
         if visual_tag:
             cap = 'Things min {:.03f} max {:.03f}'.format(x.min(), x.max())
-            imutil.show(x[0], filename='the_things_{}.png'.format(visual_tag),
-                        resize_to=(512,1024), caption=cap, font_size=8, img_padding=10)
+            img = x[0] - x[0].min()
+            imutil.show(img, filename='the_things_{}.png'.format(visual_tag),
+                        resize_to=(512, 1024), caption=cap, font_size=8, img_padding=10)
 
+        aux_loss = torch.mean(x ** 2)
         # Combine independent additive objects-in-locations
         x = x.sum(dim=1)
 
         if enable_aux_loss:
-            return x, overlap_metric
+            # Hack: add noise
+            #x += x.new(x.shape).normal_(0, .01)
+            return x, aux_loss
+        x = torch.tanh(x)
         return x
 
 
@@ -227,6 +241,7 @@ class SpatialCoordToMap(nn.Module):
         self.z = z
         self.num_places = z // 4
         self.gamma = nn.Parameter(torch.ones(1).cuda())
+        self.alpha = torch.nn.Parameter(torch.zeros(self.num_places).cuda())
 
     def forward(self, x_cat):
         batch_size, num_axes, k = x_cat.shape
@@ -235,7 +250,8 @@ class SpatialCoordToMap(nn.Module):
         for i in range(0, num_places):
             horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
             places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
-        #places = places ** self.gamma
+        dots = (places == places.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0].cuda()).float()
+        places = places + torch.einsum('bchw,c->bchw', [dots, torch.exp(self.alpha)])
         return places
 
 
@@ -303,7 +319,7 @@ class RealToCategorical(nn.Module):
         perceived_locations = x.unsqueeze(-1).repeat(1, 1, self.k)
         reference_locations = self.rho.unsqueeze(0).repeat(batch_size, 1, 1)
         distances = (perceived_locations - reference_locations)
-        distances = torch.einsum('bzk,z->bzk', [distances, torch.exp(self.eta)])
+        distances = torch.einsum('bzk,z->bzk', [distances, torch.exp(self.eta) + 1])
         # IMQ kernel
         if self.kernel == 'inverse_multiquadratic':
             eps = .1
@@ -321,9 +337,9 @@ class RealToCategorical(nn.Module):
         # Hack: Run softmax, at multiple scales
         #probs = torch.softmax(kern, dim=2) + torch.softmax(kern*1000, dim=2)
 
-        # Hack: make the center pixel stand out
-        dots = (probs == probs.max(dim=2, keepdim=True)[0]).float()
-        probs = probs + torch.einsum('bzk,z->bzk', [dots, torch.exp(self.beta)])
+        # Hack: make the center pixel stand out (per dimension)
+        #dots = (probs == probs.max(dim=2, keepdim=True)[0]).float()
+        #probs = probs + torch.einsum('bzk,z->bzk', [dots, torch.exp(self.beta)])
         return probs
 
     def clamp_weights(self, *args):
