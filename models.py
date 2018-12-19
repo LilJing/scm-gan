@@ -73,14 +73,15 @@ class Encoder(nn.Module):
         return x
 
 
+from spectral_normalization import SpectralNorm
 class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
         # Bx1x64x64
-        self.conv1 = nn.Conv2d(3, 32, 1, stride=1, padding=0)
+        self.conv1 = SpectralNorm(nn.Conv2d(3, 32, 1, stride=1, padding=0))
         self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.Conv2d(32, 32, 1, stride=1, padding=0)
+        self.conv2 = SpectralNorm(nn.Conv2d(32, 32, 1, stride=1, padding=0))
         self.bn_conv2 = nn.BatchNorm2d(32)
 
         self.conv3 = nn.Conv2d(32, 1, 3, padding=1)
@@ -155,7 +156,7 @@ class Decoder(nn.Module):
         places = self.spatial_map(x_cat)
 
         # Hack: disincentivize overlap among position distributions
-        aux_loss = torch.mean(places.sum(dim=1)**2)
+        aux_loss = 0 * torch.mean(places.sum(dim=1)**2)
         #places = places / (places.mean() + places.sum(dim=1, keepdim=True))
 
         if visual_tag:
@@ -168,6 +169,7 @@ class Decoder(nn.Module):
         x_things = self.things_fc1(z_things)
         x_things = x_things.unsqueeze(1).unsqueeze(3).unsqueeze(4)
         x_things = x_things.repeat(1, num_places, 1, self.width, self.width)
+        x_things = x_things * 0
 
         # Apply separable convolutions to draw one "thing" at each sampled location
         x_places = places.unsqueeze(2)
@@ -408,3 +410,5 @@ def norm(x):
     norm = torch.norm(x, p=2, dim=1)
     x = x / (norm.expand(1, -1).t() + .0001)
     return x
+
+

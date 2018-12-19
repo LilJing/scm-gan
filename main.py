@@ -146,11 +146,10 @@ def main():
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, 1)
         states = torch.Tensor(states[:, 0]).cuda()
 
-        if theta > .15:
-            fake_scores = discriminator(decoder(encoder(states)))
-            gen_loss = .0001 * theta * torch.mean(F.relu(1 - fake_scores))
-            ts.collect('D. gen', gen_loss)
-            gen_loss.backward()
+        fake_scores = discriminator(decoder(encoder(states).detach()))
+        gen_loss = .0001 * theta * torch.mean(F.relu(1 - fake_scores))
+        ts.collect('D. gen', gen_loss)
+        gen_loss.backward()
 
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
         states = torch.Tensor(states).cuda()
