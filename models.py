@@ -47,7 +47,45 @@ class Encoder(nn.Module):
         self.fc1 = nn.Linear(32*16*16, 256)
         self.bn1 = nn.BatchNorm1d(256)
         self.fc2 = nn.Linear(256, latent_size)
-        #self.fc2.weight.data.normal_(0, .1)
+        self.fc2.weight.data.normal_(0, .01)
+
+        # Bxlatent_size
+        self.cuda()
+
+    def forward(self, x, visual_tag=None):
+        # Input: B x 1 x 64 x 64
+        batch_size, channels, height, width = x.shape
+
+        x = self.conv1(x)
+        x = self.bn_conv1(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv2(x)
+        x = self.bn_conv2(x)
+        x = F.leaky_relu(x)
+
+        x = x.view(-1, 32*16*16)
+        x = self.fc1(x)
+        x = self.bn1(x)
+        x = F.leaky_relu(x)
+
+        x = self.fc2(x)
+        return x
+
+
+class Discriminator(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # Bx1x64x64
+        self.conv1 = CoordConv2d(3 + 2, 32, 4, stride=2, padding=1)
+        self.bn_conv1 = nn.BatchNorm2d(32)
+        # Bx8x32x32
+        self.conv2 = CoordConv2d(32 + 2, 32, 4, stride=2, padding=1)
+        self.bn_conv2 = nn.BatchNorm2d(32)
+
+        self.fc1 = nn.Linear(32*16*16, 256)
+        self.bn1 = nn.BatchNorm1d(256)
+        self.fc2 = nn.Linear(256, 1)
 
         # Bxlatent_size
         self.cuda()
@@ -90,7 +128,7 @@ class Decoder(nn.Module):
         self.places_conv1 = nn.Conv2d(num_places, num_places*16, kernel_size=5, groups=num_places, bias=False)
         self.pad_conv2 = nn.ReflectionPad2d(2)
         self.places_conv2 = nn.Conv2d(num_places*16, num_places*16, kernel_size=5, groups=num_places, bias=False)
-        self.to_rgb = nn.ConvTranspose2d(num_places*16, num_places*3, groups=num_places, kernel_size=3, padding=1, bias=False)
+        self.to_rgb = nn.ConvTranspose2d(num_places, num_places*3, groups=num_places, kernel_size=5, padding=2, bias=False)
 
         # Test: just RGB
         #self.to_rgb = nn.ConvTranspose2d(num_places, num_places*3, groups=num_places, kernel_size=5, padding=2, bias=False)
@@ -130,18 +168,17 @@ class Decoder(nn.Module):
 
         # Apply separable convolutions to draw one "thing" at each sampled location
         x = places
-        x = self.pad_conv1(x)
-        x = self.places_conv1(x)
+        #x = self.pad_conv1(x)
+        #x = self.places_conv1(x)
 
         # Append non-location-specific information
-        zx = self.things_fc1(z_things)
-        zx = torch.tanh(zx)
-        x = x * zx.unsqueeze(2).unsqueeze(3)
+        #zx = self.things_fc1(z_things)
+        #x = x * zx.unsqueeze(2).unsqueeze(3)
 
-        x = F.leaky_relu(x, 0.2)
-        x = self.pad_conv2(x)
-        x = self.places_conv2(x)
-        x = F.leaky_relu(x, 0.2)
+        #x = F.leaky_relu(x, 0.2)
+        #x = self.pad_conv2(x)
+        #x = self.places_conv2(x)
+        #x = F.leaky_relu(x, 0.2)
         x = self.to_rgb(x)
         x = x.view(batch_size, num_places, 3, 64, 64)
         if visual_tag:
@@ -241,7 +278,7 @@ class RealToCategorical(nn.Module):
         11111111111111
         11111111000000
     """
-    def __init__(self, z, k, kernel='inverse_multiquadratic'):
+    def __init__(self, z, k, kernel='gaussian'):
         super().__init__()
         self.z = z
         self.k = k
@@ -252,7 +289,8 @@ class RealToCategorical(nn.Module):
 
         # Sharpness/scale parameter
         self.eta = torch.nn.Parameter(torch.zeros(self.z).cuda())
-        self.gamma = torch.nn.Parameter(torch.ones(self.z).cuda())
+        self.gamma = torch.nn.Parameter(torch.zeros(self.z).cuda())
+        self.beta = torch.nn.Parameter(torch.zeros(self.z).cuda())
         self.register_backward_hook(self.clamp_weights)
         self.cuda()
 
@@ -272,11 +310,20 @@ class RealToCategorical(nn.Module):
             kern = eps / (eps + distances**2)
         elif self.kernel == 'gaussian':
             kern = torch.exp(-distances**2)
-        #kern = torch.einsum('bzk,z->bzk', [kern, self.gamma])
-        #kern = kern * 8
+        kern = torch.einsum('bzk,z->bzk', [kern, torch.exp(self.gamma)])
+
         # Output is a category between 1 and K, for each of the Z real values
+        probs = kern
+
+        # Hack: Normalize kernel without running softmax
         #probs = kern / kern.sum(dim=2, keepdim=True)
-        probs = torch.softmax(kern, dim=2) + torch.softmax(kern*1000, dim=2)
+
+        # Hack: Run softmax, at multiple scales
+        #probs = torch.softmax(kern, dim=2) + torch.softmax(kern*1000, dim=2)
+
+        # Hack: make the center pixel stand out
+        dots = (probs == probs.max(dim=2, keepdim=True)[0]).float()
+        probs = probs + torch.einsum('bzk,z->bzk', [dots, torch.exp(self.beta)])
         return probs
 
     def clamp_weights(self, *args):

@@ -88,9 +88,10 @@ def main():
     latent_dim = 12
     true_latent_dim = 4
     num_actions = 4
-    train_iters = 400 * 1000
+    train_iters = 200 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
+    discriminator = models.Discriminator()
     transition = models.Transition(latent_dim, num_actions)
     blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
@@ -104,9 +105,10 @@ def main():
         transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
 
     # Train the autoencoder
-    opt_enc = torch.optim.Adam(encoder.parameters(), lr=.01)
-    opt_dec = torch.optim.Adam(decoder.parameters(), lr=.01)
-    opt_trans = torch.optim.Adam(transition.parameters(), lr=.01)
+    opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
+    opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
+    opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
+    opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.001)
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
         timesteps = 1 + train_iter // 10000
@@ -121,6 +123,7 @@ def main():
         opt_enc.zero_grad()
         opt_dec.zero_grad()
         opt_trans.zero_grad()
+        opt_disc.zero_grad()
 
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
         states = torch.Tensor(states).cuda()
@@ -135,7 +138,7 @@ def main():
             ts.collect('logits min', pred_logits.min())
             ts.collect('logits max', pred_logits.max())
             ts.collect('aux loss', aux_loss)
-            loss += aux_loss
+            #loss += aux_loss
 
             expected = states[:, t]
             #predicted = torch.sigmoid(pred_logits)
