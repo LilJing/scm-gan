@@ -150,7 +150,7 @@ def main():
             # MSE loss but weighted toward foreground pixels
             error_mask = torch.mean((expected - predicted) ** 2, dim=1)
             foreground_mask = torch.mean(blur(expected), dim=1)
-            theta = (train_iter + 6000 / train_iters)
+            theta = 0.1 + 0.9 * (train_iter / train_iters)
             error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
             rec_loss = torch.mean(error_mask)
 
