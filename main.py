@@ -149,7 +149,7 @@ def main():
         fake_scores = discriminator(decoder(encoder(states).detach()))
         gen_loss = .0001 * theta * torch.mean(F.relu(1 - fake_scores))
         ts.collect('D. gen', gen_loss)
-        gen_loss.backward()
+        #gen_loss.backward()
 
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
         states = torch.Tensor(states).cuda()

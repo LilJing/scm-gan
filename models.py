@@ -156,7 +156,7 @@ class Decoder(nn.Module):
         places = self.spatial_map(x_cat)
 
         # Hack: disincentivize overlap among position distributions
-        aux_loss = 0 * torch.mean(places.sum(dim=1)**2)
+        aux_loss = 0.01 * torch.mean(places.sum(dim=1)**2)
         #places = places / (places.mean() + places.sum(dim=1, keepdim=True))
 
         if visual_tag:
@@ -187,7 +187,7 @@ class Decoder(nn.Module):
             cap = 'Things min {:.03f} max {:.03f}'.format(x.min(), x.max())
             img = x[0] - x[0].min()
             imutil.show(img, filename='the_things_{}.png'.format(visual_tag),
-                        resize_to=(512, 1024), caption=cap, font_size=8, img_padding=10)
+                        resize_to=(512, 512), caption=cap, font_size=8, img_padding=10)
 
         # Combine independent additive objects-in-locations
         x = x.sum(dim=1)
