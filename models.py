@@ -121,10 +121,10 @@ class Decoder(nn.Module):
 
         # Separable convolutions
         self.pad_conv1 = nn.ReflectionPad2d(2)
-        #self.places_conv1 = nn.Conv2d(num_places, num_places*16, kernel_size=5, groups=num_places, bias=False)
-        #self.pad_conv2 = nn.ReflectionPad2d(2)
-        #self.places_conv2 = nn.Conv2d(num_places*16, num_places*16, kernel_size=5, groups=num_places, bias=False)
-        self.to_rgb = nn.Conv2d(num_places* (1 + global_channels), num_places*3, kernel_size=5, groups=num_places, bias=False)
+        self.places_conv1 = nn.Conv2d(num_places * (1 + global_channels), num_places*16, kernel_size=3, groups=num_places, bias=False)
+        self.pad_conv2 = nn.ReflectionPad2d(2)
+        self.places_conv2 = nn.Conv2d(num_places*16, num_places*16, kernel_size=3, groups=num_places, bias=False)
+        self.to_rgb = nn.Conv2d(num_places*16, num_places*3, kernel_size=5, groups=num_places, bias=False)
 
         # Test: just RGB
         #self.to_rgb = nn.ConvTranspose2d(num_places, num_places*3, groups=num_places, kernel_size=5, padding=2, bias=False)
@@ -143,7 +143,6 @@ class Decoder(nn.Module):
         num_places = self.latent_size // 4
         z_places, z_things = z[:, :num_places*2], z[:, num_places*2:]
 
-        # Compute places as ring of outer products, one place per latent dim
         x_cat = self.to_categorical(z_places)
         if visual_tag:
             imutil.show(x_cat[0], font_size=8, resize_to=(self.k, self.latent_size),
@@ -169,18 +168,18 @@ class Decoder(nn.Module):
         x_things = self.things_fc1(z_things)
         x_things = x_things.unsqueeze(1).unsqueeze(3).unsqueeze(4)
         x_things = x_things.repeat(1, num_places, 1, self.width, self.width)
-        x_things = x_things * 0
 
-        # Apply separable convolutions to draw one "thing" at each sampled location
+        # Apply separable convolutions to draw one "thing" at each location
         x_places = places.unsqueeze(2)
         x = torch.cat([x_places, x_things], dim=2)
         x = x.view(batch_size, -1, self.width, self.width)
 
-        #x = F.leaky_relu(x, 0.2)
-        #x = self.pad_conv2(x)
-        #x = self.places_conv2(x)
-        #x = F.leaky_relu(x, 0.2)
         x = self.pad_conv1(x)
+        x = self.places_conv1(x)
+        x = F.leaky_relu(x, 0.2)
+        x = self.pad_conv2(x)
+        x = self.places_conv2(x)
+        x = F.leaky_relu(x, 0.2)
         x = self.to_rgb(x)
         x = x.view(batch_size, num_places, 3, 64, 64)
         if visual_tag:
@@ -247,95 +246,19 @@ class SpatialCoordToMap(nn.Module):
         return places
 
 
-def gumbel_sample_1d(pdf, beta=1.0):
-    from torch.distributions.gumbel import Gumbel
-    noise = Gumbel(torch.zeros(size=pdf.shape), beta * torch.ones(size=pdf.shape)).sample().cuda()
-    log_pdf = torch.log(pdf) + noise
-    max_points = log_pdf.max(dim=1, keepdim=True)[0]
-    return pdf * (log_pdf == max_points).type(torch.FloatTensor).cuda()
-
-
-def gumbel_sample_2d(pdf, beta=1.0):
-    batch_size, channels, height, width = pdf.shape
-    # Generate a density function (differentiable)
-    pdf_probs = pdf / pdf.sum(dim=2, keepdim=True).sum(dim=3, keepdim=True)
-
-    # Perform sampling (non-differentiable)
-    log_probs = F.log_softmax(pdf_probs.view(batch_size, channels, -1), dim=2).view(pdf.shape)
-    from torch.distributions.gumbel import Gumbel
-    beta = 1 / (height*width)
-    noise = Gumbel(torch.zeros(size=pdf.shape), beta * torch.ones(size=pdf.shape)).sample().cuda()
-    log_probs += noise
-    max_values = log_probs.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
-    sampled_mask = (log_probs == max_values).type(torch.FloatTensor).cuda()
-
-    # Mask out all but the sampled values
-    pdf = pdf_probs * sampled_mask
-    return pdf
-
-
 class RealToCategorical(nn.Module):
-    """
-    Input: Real values eg. -0.25, 4.1, 0
-    Output: Categorical encoding like:
-        00010000000000
-        00000000000001
-        00000001000000
-    OR Thermometer encoding like:
-        11110000000000
-        11111111111111
-        11111111000000
-    """
-    def __init__(self, z, k, kernel='gaussian'):
+    def __init__(self, z, k):
         super().__init__()
         self.z = z
         self.k = k
-        self.kernel = kernel
-        self.rho = torch.arange(-1, 1, 2/k).unsqueeze(0).repeat(z, 1).cuda()
-        # For learnable particle positions
-        #self.rho = torch.nn.Parameter(self.rho)
-
-        # Sharpness/scale parameter
-        self.eta = torch.nn.Parameter(torch.zeros(self.z).cuda())
-        self.gamma = torch.nn.Parameter(torch.zeros(self.z).cuda())
-        self.beta = torch.nn.Parameter(torch.zeros(self.z).cuda())
-        self.register_backward_hook(self.clamp_weights)
+        self.fc1 = torch.nn.Linear(z, k*z)
         self.cuda()
-
 
     def forward(self, x):
         # x is a real-valued tensor size (batch, Z)
-        batch_size = len(x)
-        x = torch.tanh(x)
-        # Broadcast x to (batch, Z, K)
-        perceived_locations = x.unsqueeze(-1).repeat(1, 1, self.k)
-        reference_locations = self.rho.unsqueeze(0).repeat(batch_size, 1, 1)
-        distances = (perceived_locations - reference_locations)
-        distances = torch.einsum('bzk,z->bzk', [distances, torch.exp(self.eta) + 1])
-        # IMQ kernel
-        if self.kernel == 'inverse_multiquadratic':
-            eps = .1
-            kern = eps / (eps + distances**2)
-        elif self.kernel == 'gaussian':
-            kern = torch.exp(-distances**2)
-        kern = torch.einsum('bzk,z->bzk', [kern, torch.exp(self.gamma)])
-
-        # Output is a category between 1 and K, for each of the Z real values
-        probs = kern
-
-        # Hack: Normalize kernel without running softmax
-        #probs = kern / kern.sum(dim=2, keepdim=True)
-
-        # Hack: Run softmax, at multiple scales
-        #probs = torch.softmax(kern, dim=2) + torch.softmax(kern*1000, dim=2)
-
-        # Hack: make the center pixel stand out (per dimension)
-        #dots = (probs == probs.max(dim=2, keepdim=True)[0]).float()
-        #probs = probs + torch.einsum('bzk,z->bzk', [dots, torch.exp(self.beta)])
-        return probs
-
-    def clamp_weights(self, *args):
-        self.eta.data.clamp_(min=-2, max=+2)
+        batch_size, z = x.shape
+        x = self.fc1(x).view(-1, self.z, self.k)
+        return x
 
 
 # https://discuss.pytorch.org/t/is-there-anyway-to-do-gaussian-filtering-for-an-image-2d-3d-in-pytorch/12351/8

@@ -85,7 +85,7 @@ def norm(x):
 
 def main():
     batch_size = 64
-    latent_dim = 12
+    latent_dim = 16
     true_latent_dim = 4
     num_actions = 4
     train_iters = 200 * 1000
@@ -111,9 +111,9 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters)
-    for train_iter in range(1, train_iters + 1):
-        timesteps = 1 + train_iter // 10000
-        theta = 0.1 + 0.9 * (train_iter / train_iters)
+    for train_iter in range(10000, train_iters + 1):
+        theta = (train_iter / train_iters)
+        timesteps = 1 + int(10 * theta)
         encoder.train()
         decoder.train()
         transition.train()
@@ -146,10 +146,12 @@ def main():
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, 1)
         states = torch.Tensor(states[:, 0]).cuda()
 
+        """
         fake_scores = discriminator(decoder(encoder(states).detach()))
         gen_loss = .0001 * theta * torch.mean(F.relu(1 - fake_scores))
         ts.collect('D. gen', gen_loss)
-        #gen_loss.backward()
+        gen_loss.backward()
+        """
 
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
         states = torch.Tensor(states).cuda()
@@ -275,7 +277,8 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
     for i in range(1, latent_dim):
         ground_truth[i] = ground_truth[0]
     zt = encoder(ground_truth)
-    minval, maxval = decoder.to_categorical.rho.min(), decoder.to_categorical.rho.max()
+    #minval, maxval = decoder.to_categorical.rho.min(), decoder.to_categorical.rho.max()
+    minval, maxval = -1, 1
 
     # Generate L videos, one per latent dimension
     vid = imutil.Video('latent_traversal_dims_{:04d}_iter_{:06d}'.format(latent_dim, train_iter))
@@ -289,7 +292,9 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
         reconstructed = decoder(encoder(ground_truth))
         video_frame = torch.cat([ground_truth[:1], reconstructed[:1], output], dim=0)
         caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
-        vid.write_frame(video_frame, resize_to=(img_size,img_size), caption=caption, img_padding=8)
+        # Clip and scale
+        video_frame = 255 * torch.clamp(video_frame, 0, 1)
+        vid.write_frame(video_frame, resize_to=(img_size,img_size), caption=caption, img_padding=8, normalize=False)
     vid.finish()
 
 
