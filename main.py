@@ -111,7 +111,7 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters)
-    for train_iter in range(10000, train_iters + 1):
+    for train_iter in range(1, train_iters + 1):
         theta = (train_iter / train_iters)
         timesteps = 1 + int(10 * theta)
         encoder.train()
@@ -162,11 +162,9 @@ def main():
         z = encoder(states[:, 0])
         ts.collect('encoder z[0] mean', z[0].mean())
         for t in range(timesteps):
-            pred_logits, aux_loss = decoder(z, enable_aux_loss=True)
+            pred_logits = decoder(z)
             ts.collect('logits min', pred_logits.min())
             ts.collect('logits max', pred_logits.max())
-            ts.collect('aux loss', aux_loss)
-            loss += .0001 * aux_loss
 
             expected = states[:, t]
             #predicted = torch.sigmoid(pred_logits)
@@ -200,8 +198,6 @@ def main():
             # loss += mmd_loss
 
         loss.backward()
-
-        ts.collect('rgb weight std.', decoder.to_rgb.weight.std())
 
         opt_enc.step()
         opt_dec.step()

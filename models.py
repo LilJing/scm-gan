@@ -21,16 +21,26 @@ class Transition(nn.Module):
         # Input: State + Action
         # Output: State
         self.latent_size = latent_size
-        self.fc1 = nn.Linear(num_actions + self.latent_size, 128)
-        self.fc2 = nn.Linear(128, latent_size)
+        self.conv1 = nn.Conv2d(latent_size + num_actions, 128, (3,3), padding=1)
+        self.conv2 = nn.Conv2d(128, latent_size, (3,3), padding=1)
         self.cuda()
 
-    def forward(self, z, actions):
-        x = torch.cat([z, actions], dim=1)
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        return z + x
+    def forward(self, z_map, actions):
+        batch_size, z, height, width = z_map.shape
+        batch_size_actions, num_actions = actions.shape
+        assert batch_size == batch_size_actions
+
+        # First, broadcast the actions across the map
+        # Then apply the next-frame prediction CNN
+        actions = actions.unsqueeze(-1).unsqueeze(-1)
+        actions = actions.repeat(1, 1, height, width)
+
+        x = torch.cat([z_map, actions], dim=1)
+        x = self.conv1(x)
+        x = F.leaky_relu(x)
+        x = self.conv2(x)
+        x = F.leaky_relu(x)
+        return x
 
 
 class Encoder(nn.Module):
@@ -38,16 +48,10 @@ class Encoder(nn.Module):
         super().__init__()
         self.latent_size = latent_size
         # Bx1x64x64
-        self.conv1 = CoordConv2d(3 + 2, 32, 4, stride=2, padding=1)
+        self.conv1 = nn.Conv2d(3, 32, 4, stride=2, padding=1)
         self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = CoordConv2d(32 + 2, 32, 4, stride=2, padding=1)
-        self.bn_conv2 = nn.BatchNorm2d(32)
-
-        self.fc1 = nn.Linear(32*16*16, 256)
-        self.bn1 = nn.BatchNorm1d(256)
-        self.fc2 = nn.Linear(256, latent_size)
-        self.fc2.weight.data.normal_(0, .01)
+        self.conv2 = nn.Conv2d(32, latent_size, 4, stride=2, padding=1)
 
         # Bxlatent_size
         self.cuda()
@@ -61,15 +65,7 @@ class Encoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.conv2(x)
-        x = self.bn_conv2(x)
         x = F.leaky_relu(x)
-
-        x = x.view(-1, 32*16*16)
-        x = self.fc1(x)
-        x = self.bn1(x)
-        x = F.leaky_relu(x)
-
-        x = self.fc2(x)
         return x
 
 
@@ -105,159 +101,25 @@ class Discriminator(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, latent_size, k=64, m=12):
+    def __init__(self, latent_size):
         super().__init__()
         self.latent_size = latent_size
-        self.width = 64
-        num_places = latent_size // 4
-        # K is the number of buckets to use when discretizing
-        self.k = k
-        # M is the number of kinds of things that there can be
-        #self.m = m
 
-        self.to_categorical = RealToCategorical(z=latent_size//2, k=k)
-
-        global_channels = num_places*4
-
-        # Separable convolutions
-        self.pad_conv1 = nn.ReflectionPad2d(2)
-        self.places_conv1 = nn.Conv2d(num_places * (1 + global_channels), num_places*16, kernel_size=3, groups=num_places, bias=False)
-        self.pad_conv2 = nn.ReflectionPad2d(2)
-        self.places_conv2 = nn.Conv2d(num_places*16, num_places*16, kernel_size=3, groups=num_places, bias=False)
-        self.to_rgb = nn.Conv2d(num_places*16, num_places*3, kernel_size=5, groups=num_places, bias=False)
-
-        # Test: just RGB
-        #self.to_rgb = nn.ConvTranspose2d(num_places, num_places*3, groups=num_places, kernel_size=5, padding=2, bias=False)
-        #self.to_rgb.weight.data = torch.abs(self.to_rgb.weight.data)
-
-
-        self.things_fc1 = nn.Linear(self.latent_size//2, global_channels)
-        #self.spatial_sample = SpatialSampler(k=k)
-        self.spatial_map = SpatialCoordToMap(k=k, z=latent_size)
-
+        # Bx1x64x64
+        self.conv1 = nn.ConvTranspose2d(latent_size, 32, (4,4), stride=2, padding=1)
+        self.bn_conv1 = nn.BatchNorm2d(32)
+        # Bx8x32x32
+        self.conv2 = nn.ConvTranspose2d(32, 3, (4,4), stride=2, padding=1)
         self.cuda()
 
-    def forward(self, z, visual_tag=None, enable_aux_loss=False):
-        # The world consists of things in places.
-        batch_size = len(z)
-        num_places = self.latent_size // 4
-        z_places, z_things = z[:, :num_places*2], z[:, num_places*2:]
+    def forward(self, z_map, visual_tag=None):
+        batch_size, latent_size, height, width = z_map.shape
 
-        x_cat = self.to_categorical(z_places)
-        if visual_tag:
-            imutil.show(x_cat[0], font_size=8, resize_to=(self.k, self.latent_size),
-                        filename='visual_to_cat_{}.png'.format(visual_tag))
+        x = self.conv1(z_map)
+        x = self.bn_conv1(x)
+        x = F.leaky_relu(x)
 
-        # Failed experiment: Sample stochastically from the distribution!
-        #places, sampled_points = self.spatial_sample(x_cat)
-        #sample_from = sampled_points / (sampled_points.sum(dim=3, keepdim=True).sum(dim=2, keepdim=True))
-
-        places = self.spatial_map(x_cat)
-
-        # Hack: disincentivize overlap among position distributions
-        aux_loss = 0.01 * torch.mean(places.sum(dim=1)**2)
-        #places = places / (places.mean() + places.sum(dim=1, keepdim=True))
-
-        if visual_tag:
-            cap = 'Places min {:.03f} max {:.03f}'.format(places.min(), places.max())
-            imutil.show(places[0] / places[0].max(), filename='visual_places_{}.png'.format(visual_tag),
-                        resize_to=(512, 512), caption=cap, img_padding=8)
-
-
-        # Append non-location-specific information to each "place" channel
-        x_things = self.things_fc1(z_things)
-        x_things = x_things.unsqueeze(1).unsqueeze(3).unsqueeze(4)
-        x_things = x_things.repeat(1, num_places, 1, self.width, self.width)
-
-        # Apply separable convolutions to draw one "thing" at each location
-        x_places = places.unsqueeze(2)
-        x = torch.cat([x_places, x_things], dim=2)
-        x = x.view(batch_size, -1, self.width, self.width)
-
-        x = self.pad_conv1(x)
-        x = self.places_conv1(x)
-        x = F.leaky_relu(x, 0.2)
-        x = self.pad_conv2(x)
-        x = self.places_conv2(x)
-        x = F.leaky_relu(x, 0.2)
-        x = self.to_rgb(x)
-        x = x.view(batch_size, num_places, 3, 64, 64)
-        if visual_tag:
-            cap = 'Things min {:.03f} max {:.03f}'.format(x.min(), x.max())
-            img = x[0] - x[0].min()
-            imutil.show(img, filename='the_things_{}.png'.format(visual_tag),
-                        resize_to=(512, 512), caption=cap, font_size=8, img_padding=10)
-
-        # Combine independent additive objects-in-locations
-        x = x.sum(dim=1)
-
-        if enable_aux_loss:
-            # Hack: add noise
-            #x += x.new(x.shape).normal_(0, .01)
-            return x, aux_loss
-        x = torch.tanh(x)
-        return x
-
-
-# Input: categorical estimates of x and y coordinates
-# Output: 2d feature maps with all but one pixel masked to zero
-class SpatialSampler(nn.Module):
-    def __init__(self, k):
-        super().__init__()
-        self.k = k
-        self.t = 0
-
-    def forward(self, x_cat):
-        batch_size, num_axes, k = x_cat.shape
-        num_places = num_axes // 2
-        self.places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
-        self.sampled_points = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
-        for i in range(0, num_places):
-            horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
-            self.places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
-            # Sample from horiz and from vert to select a spatial point
-            beta = .1 + .1 * np.sin(self.t / 1000)
-            horiz = gumbel_sample_1d(horiz, beta=beta)
-            vert = gumbel_sample_1d(vert, beta=beta)
-            self.sampled_points[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
-        self.sampled_points *= 100
-        self.t += 1
-        return self.places, self.sampled_points
-
-
-class SpatialCoordToMap(nn.Module):
-    def __init__(self, k, z):
-        super().__init__()
-        self.k = k
-        self.z = z
-        self.num_places = z // 4
-        self.gamma = nn.Parameter(torch.ones(1).cuda())
-        self.alpha = torch.nn.Parameter(torch.zeros(self.num_places).cuda())
-
-    def forward(self, x_cat):
-        batch_size, num_axes, k = x_cat.shape
-        num_places = num_axes // 2
-        places = torch.zeros((batch_size, num_places, self.k, self.k)).cuda()
-        for i in range(0, num_places):
-            horiz, vert = x_cat[:,i*2], x_cat[:,(i*2)+1]
-            places[:, i] = torch.einsum('ij,ik->ijk', [horiz, vert])
-        dots = (places == places.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0].cuda()).float()
-        places = places + torch.einsum('bchw,c->bchw', [dots, torch.exp(self.alpha)])
-        return places
-
-
-class RealToCategorical(nn.Module):
-    def __init__(self, z, k):
-        super().__init__()
-        self.z = z
-        self.k = k
-        self.fc1 = torch.nn.Linear(z, k*z)
-        self.cuda()
-
-    def forward(self, x):
-        # x is a real-valued tensor size (batch, Z)
-        batch_size, z = x.shape
-        x = self.fc1(x).view(-1, self.z, self.k)
+        x = self.conv2(x)
         return x
 
 
