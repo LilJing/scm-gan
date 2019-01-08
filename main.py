@@ -96,8 +96,8 @@ def main():
     blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
-    #load_from_dir = '.'
-    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_f7ca635b'
+    load_from_dir = '.'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_f7ca635b'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -166,9 +166,9 @@ def main():
         for t in range(timesteps):
             pred_logits = decoder(z)
 
-            l1_penalty = theta * .01 * z.abs().mean()
-            ts.collect('L1 t={}'.format(t), l1_penalty)
-            loss += l1_penalty
+            #l1_penalty = theta * .01 * z.abs().mean()
+            #ts.collect('L1 t={}'.format(t), l1_penalty)
+            #loss += l1_penalty
 
             expected = states[:, t]
             #predicted = torch.sigmoid(pred_logits)
@@ -196,9 +196,10 @@ def main():
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
 
-            trans_l1_penalty = theta * .001 * (new_z - z).abs().mean()
-            ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
-            loss += trans_l1_penalty
+            #trans_l1_penalty = theta * .001 * (new_z - z).abs().mean()
+            #ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
+            #loss += trans_l1_penalty
+
             z = new_z
 
             # Maximum Mean Discrepancy: Regularization toward gaussian
