@@ -113,7 +113,7 @@ def main():
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
         theta = (train_iter / train_iters)
-        timesteps = 1 + int(10 * theta)
+        timesteps = 10 + int(50 * theta)
         encoder.train()
         decoder.train()
         transition.train()
@@ -237,6 +237,7 @@ def main():
             visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter)
 
         # Periodically compute the Higgins score
+        """
         if train_iter % 10000 == 0:
             if not hasattr(datasource, 'simulator'):
                 print('Datasource {} does not support direct simulation, skipping disentanglement metrics'.format(datasource.__name__))
@@ -247,6 +248,7 @@ def main():
                 print('Higgins metric after training {} iters: {}'.format(train_iter, higgins_scores[-1]))
                 print('Best Higgins: {}'.format(max(higgins_scores)))
                 ts.collect('Higgins Metric', trained_score)
+        """
     print(ts)
     print('Finished')
 

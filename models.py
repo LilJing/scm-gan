@@ -21,8 +21,8 @@ class Transition(nn.Module):
         # Input: State + Action
         # Output: State
         self.latent_size = latent_size
-        self.conv1 = nn.Conv2d(latent_size + num_actions, 128, (3,3), padding=1)
-        self.conv2 = nn.Conv2d(128, latent_size, (3,3), padding=1)
+        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 128, (3,3), padding=1))
+        self.conv2 = SpectralNorm(nn.Conv2d(128, latent_size, (3,3), padding=1))
         self.cuda()
 
     def forward(self, z_map, actions):
