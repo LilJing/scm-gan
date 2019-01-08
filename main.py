@@ -97,7 +97,7 @@ def main():
     higgins_scores = []
 
     load_from_dir = '.'
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_e17ac4f5'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_bc5dde9f'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -196,9 +196,10 @@ def main():
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
 
-            #trans_l1_penalty = theta * .1 * (new_z - z).abs().mean()
-            #ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
+            trans_l1_penalty = theta * .001 * (new_z - z).abs().mean()
+            ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
             #loss += trans_l1_penalty
+            z = new_z
 
             # Maximum Mean Discrepancy: Regularization toward gaussian
             # mmd_loss = mmd_normal_penalty(z)
