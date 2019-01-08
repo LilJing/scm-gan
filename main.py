@@ -88,7 +88,7 @@ def main():
     latent_dim = 16
     true_latent_dim = 4
     num_actions = 4
-    train_iters = 200 * 1000
+    train_iters = 20 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
     discriminator = models.Discriminator()
@@ -124,6 +124,7 @@ def main():
                     child.momentum = 0.1
 
         # Train discriminator
+        """
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, 1)
         states = torch.Tensor(states[:, 0]).cuda()
         opt_disc.zero_grad()
@@ -136,6 +137,7 @@ def main():
         disc_loss = real_loss + fake_loss
         disc_loss.backward()
         opt_disc.step()
+        """
 
         # Train the rest of the network
         opt_enc.zero_grad()
@@ -163,21 +165,19 @@ def main():
         ts.collect('encoder z[0] mean', z[0].mean())
         for t in range(timesteps):
             pred_logits = decoder(z)
-            ts.collect('logits min', pred_logits.min())
-            ts.collect('logits max', pred_logits.max())
 
             expected = states[:, t]
             #predicted = torch.sigmoid(pred_logits)
             predicted = pred_logits
             # MSE loss
-            #rec_loss = torch.mean((expected - predicted)**2)
+            rec_loss = torch.mean((expected - predicted)**2)
             # MSE loss but blurred to prevent pathological behavior
             #rec_loss = torch.mean((blur(expected) - blur(predicted))**2)
             # MSE loss but weighted toward foreground pixels
-            error_mask = torch.mean((expected - predicted) ** 2, dim=1)
-            foreground_mask = torch.mean(blur(expected), dim=1)
-            error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
-            rec_loss = torch.mean(error_mask)
+            #error_mask = torch.mean((expected - predicted) ** 2, dim=1)
+            #foreground_mask = torch.mean(blur(expected), dim=1)
+            #error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
+            #rec_loss = torch.mean(error_mask)
 
             ts.collect('Recon. t={}'.format(t), rec_loss)
             loss += rec_loss
@@ -225,7 +225,7 @@ def main():
             visualize_latent_space(states, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
 
         # Periodically save the network
-        if train_iter % 2000 == 0:
+        if train_iter % 1000 == 0:
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
@@ -233,7 +233,7 @@ def main():
             torch.save(discriminator.state_dict(), 'model-discriminator.pth')
 
         # Periodically generate simulations of the future
-        if train_iter % 2000 == 0:
+        if train_iter % 1000 == 0:
             visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter)
 
         # Periodically compute the Higgins score
@@ -303,14 +303,14 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
     states = torch.Tensor(states).cuda()
     vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:, 0])
-    for t in range(timesteps):
+    for t in range(timesteps - 1):
         #x_t = torch.sigmoid(decoder(z))
         x_t = decoder(z)
         img = torch.cat((states[:, t][:4], x_t[:4]), dim=3)
         caption = 'Pred. t+{} a={} min={:.2f} max={:.2f}'.format(t, actions[:4, t], img.min(), img.max())
         vid.write_frame(img.clamp_(0,1), caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
         # Predict the next latent point
-        onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
+        onehot_a = torch.eye(num_actions)[actions[:, t + 1]].cuda()
         z = transition(z, onehot_a)
     vid.finish()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
