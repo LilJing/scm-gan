@@ -54,16 +54,20 @@ class MinipongEnv():
         self.ball_x += self.ball_velocity_x
         self.ball_y += self.ball_velocity_y
 
-        #if self.ball_x >= GAME_SIZE - 6 and self.ball_velocity_x > 0:
-        if self.ball_x >= GAME_SIZE - 6 and self.ball_velocity_x > 0 and self.right_y - paddle_height <= self.ball_y <= self.right_y + paddle_height:
+        if (self.ball_x >= GAME_SIZE - 6 and self.ball_velocity_x > 0 and
+            self.right_y - paddle_height <= self.ball_y <= self.right_y + paddle_height):
             self.ball_velocity_x *= -1
-        #if self.ball_x <= 6 and self.ball_velocity_x < 0:
-        if self.ball_x <= 6 and self.ball_velocity_x < 0 and self.left_y - paddle_height <= self.ball_y <= self.left_y + paddle_height:
+        if (self.ball_x <= 6 and self.ball_velocity_x < 0 and
+            self.left_y - paddle_height <= self.ball_y <= self.left_y + paddle_height):
+            self.ball_velocity_x *= -1
+        if self.ball_x >= GAME_SIZE - 2 and self.ball_velocity_x > 0:
+            self.ball_velocity_x *= -1
+        if self.ball_x <= 2 and self.ball_velocity_x < 0:
             self.ball_velocity_x *= -1
 
-        if self.ball_y >= GAME_SIZE - 1 and self.ball_velocity_y > 0:
+        if self.ball_y >= GAME_SIZE - 2 and self.ball_velocity_y > 0:
             self.ball_velocity_y *= -1
-        if self.ball_y <= 1 and self.ball_velocity_y < 0:
+        if self.ball_y <= 2 and self.ball_velocity_y < 0:
             self.ball_velocity_y *= -1
 
         self.state = build_state(self.left_y, self.right_y, self.ball_x, self.ball_y, self.ball_velocity_x, self.ball_velocity_y)
