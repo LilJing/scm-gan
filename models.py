@@ -49,7 +49,7 @@ class Encoder(nn.Module):
         self.latent_size = latent_size
         # Bx1x64x64
         self.conv1 = nn.Conv2d(3, 32, 4, stride=2, padding=1)
-        self.bn_conv1 = nn.BatchNorm2d(32)
+        #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
         self.conv2 = nn.Conv2d(32, latent_size, 4, stride=2, padding=1)
 
@@ -61,7 +61,7 @@ class Encoder(nn.Module):
         batch_size, channels, height, width = x.shape
 
         x = self.conv1(x)
-        x = self.bn_conv1(x)
+        #x = self.bn_conv1(x)
         x = F.leaky_relu(x)
 
         x = self.conv2(x)
@@ -75,10 +75,10 @@ class Discriminator(nn.Module):
         super().__init__()
         # Bx1x64x64
         self.conv1 = SpectralNorm(nn.Conv2d(3, 32, 1, stride=1, padding=0))
-        self.bn_conv1 = nn.BatchNorm2d(32)
+        #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
         self.conv2 = SpectralNorm(nn.Conv2d(32, 32, 1, stride=1, padding=0))
-        self.bn_conv2 = nn.BatchNorm2d(32)
+        #self.bn_conv2 = nn.BatchNorm2d(32)
 
         self.conv3 = nn.Conv2d(32, 1, 3, padding=1)
 
@@ -89,11 +89,11 @@ class Discriminator(nn.Module):
         batch_size, channels, height, width = x.shape
 
         x = self.conv1(x)
-        x = self.bn_conv1(x)
+        #x = self.bn_conv1(x)
         x = F.leaky_relu(x)
 
         x = self.conv2(x)
-        x = self.bn_conv2(x)
+        #x = self.bn_conv2(x)
         x = F.leaky_relu(x)
 
         x = self.conv3(x)
@@ -107,7 +107,7 @@ class Decoder(nn.Module):
 
         # Bx1x64x64
         self.conv1 = nn.ConvTranspose2d(latent_size, 32, (4,4), stride=2, padding=1)
-        self.bn_conv1 = nn.BatchNorm2d(32)
+        #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
         self.conv2 = nn.ConvTranspose2d(32, 3, (4,4), stride=2, padding=1)
         self.cuda()
@@ -116,7 +116,7 @@ class Decoder(nn.Module):
         batch_size, latent_size, height, width = z_map.shape
 
         x = self.conv1(z_map)
-        x = self.bn_conv1(x)
+        #x = self.bn_conv1(x)
         x = F.leaky_relu(x)
 
         x = self.conv2(x)

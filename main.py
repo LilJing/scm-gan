@@ -96,8 +96,8 @@ def main():
     blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
-    #load_from_dir = '/mnt/nfs/experiments/demo_2018_12_12/scm-gan_81bd12cd'
-    load_from_dir = '.'
+    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_34f17a7b'
+    #load_from_dir = '.'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
