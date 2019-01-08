@@ -88,7 +88,7 @@ def main():
     latent_dim = 16
     true_latent_dim = 4
     num_actions = 4
-    train_iters = 20 * 1000
+    train_iters = 100 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
     discriminator = models.Discriminator()
@@ -96,8 +96,8 @@ def main():
     blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
-    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_34f17a7b'
-    #load_from_dir = '.'
+    load_from_dir = '.'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_e17ac4f5'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -113,7 +113,7 @@ def main():
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
         theta = (train_iter / train_iters)
-        timesteps = 10 + int(50 * theta)
+        timesteps = 3 + int(10 * theta)
         encoder.train()
         decoder.train()
         transition.train()
@@ -166,6 +166,10 @@ def main():
         for t in range(timesteps):
             pred_logits = decoder(z)
 
+            l1_penalty = theta * .001 * z.abs().mean()
+            ts.collect('L1 t={}'.format(t), l1_penalty)
+            loss += l1_penalty
+
             expected = states[:, t]
             #predicted = torch.sigmoid(pred_logits)
             predicted = pred_logits
@@ -190,7 +194,11 @@ def main():
 
             # Predict the next latent point
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
-            z = transition(z, onehot_a)
+            new_z = transition(z, onehot_a)
+
+            #trans_l1_penalty = theta * .1 * (new_z - z).abs().mean()
+            #ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
+            #loss += trans_l1_penalty
 
             # Maximum Mean Discrepancy: Regularization toward gaussian
             # mmd_loss = mmd_normal_penalty(z)
