@@ -21,8 +21,9 @@ class Transition(nn.Module):
         # Input: State + Action
         # Output: State
         self.latent_size = latent_size
-        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 128, (3,3), padding=1))
-        self.conv2 = SpectralNorm(nn.Conv2d(128, latent_size, (3,3), padding=1))
+        self.conv1 = (nn.Conv2d(latent_size + num_actions, 128, (3,3), padding=1))
+        self.conv2 = (nn.Conv2d(128, 128, (3,3), padding=1))
+        self.conv3 = (nn.Conv2d(128, latent_size, (3,3), padding=1))
         self.cuda()
 
     def forward(self, z_map, actions):
@@ -40,6 +41,8 @@ class Transition(nn.Module):
         x = F.leaky_relu(x)
         x = self.conv2(x)
         x = F.leaky_relu(x)
+        x = self.conv3(x)
+        x = torch.sigmoid(x)
         return x
 
 
@@ -48,10 +51,10 @@ class Encoder(nn.Module):
         super().__init__()
         self.latent_size = latent_size
         # Bx1x64x64
-        self.conv1 = nn.Conv2d(3, 32, 4, stride=2, padding=1)
+        self.conv1 = nn.Conv2d(3, 128, 4, stride=2, padding=1)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.Conv2d(32, latent_size, 4, stride=2, padding=1)
+        self.conv2 = nn.Conv2d(128, latent_size, 4, stride=2, padding=1)
 
         # Bxlatent_size
         self.cuda()
@@ -65,7 +68,7 @@ class Encoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.conv2(x)
-        x = F.leaky_relu(x)
+        x = torch.sigmoid(x)
         return x
 
 
@@ -106,10 +109,10 @@ class Decoder(nn.Module):
         self.latent_size = latent_size
 
         # Bx1x64x64
-        self.conv1 = nn.ConvTranspose2d(latent_size, 32, (4,4), stride=2, padding=1)
+        self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (4,4), stride=2, padding=1, groups=latent_size, bias=False)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.ConvTranspose2d(32, 3, (4,4), stride=2, padding=1)
+        self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*3, (4,4), stride=2, padding=1, groups=latent_size, bias=False)
         self.cuda()
 
     def forward(self, z_map, visual_tag=None):
@@ -120,6 +123,13 @@ class Decoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.conv2(x)
+        # Sum the separate items
+        x = x.view(batch_size, latent_size, 3, 64, 64)
+        if visual_tag:
+            filename = 'separable_conv_{}.png'.format(visual_tag)
+            caption = 'Separable items {}'.format(visual_tag)
+            imutil.show(x[0], filename=filename, img_padding=8, caption=caption)
+        x = torch.sum(x, dim=1)
         return x
 
 
