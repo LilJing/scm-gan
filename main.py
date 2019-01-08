@@ -96,8 +96,8 @@ def main():
     blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
-    load_from_dir = '.'
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_bc5dde9f'
+    #load_from_dir = '.'
+    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_f7ca635b'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -113,7 +113,7 @@ def main():
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
         theta = (train_iter / train_iters)
-        timesteps = 3 + int(10 * theta)
+        timesteps = 5 + int(10 * theta)
         encoder.train()
         decoder.train()
         transition.train()
@@ -166,7 +166,7 @@ def main():
         for t in range(timesteps):
             pred_logits = decoder(z)
 
-            l1_penalty = theta * .001 * z.abs().mean()
+            l1_penalty = theta * .01 * z.abs().mean()
             ts.collect('L1 t={}'.format(t), l1_penalty)
             loss += l1_penalty
 
@@ -198,7 +198,7 @@ def main():
 
             trans_l1_penalty = theta * .001 * (new_z - z).abs().mean()
             ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
-            #loss += trans_l1_penalty
+            loss += trans_l1_penalty
             z = new_z
 
             # Maximum Mean Discrepancy: Regularization toward gaussian
