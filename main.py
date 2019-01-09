@@ -88,7 +88,7 @@ def main():
     latent_dim = 16
     true_latent_dim = 4
     num_actions = 4
-    train_iters = 100 * 1000
+    train_iters = 10 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
     discriminator = models.Discriminator()
@@ -97,7 +97,7 @@ def main():
     higgins_scores = []
 
     load_from_dir = '.'
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_f7ca635b'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_fec6f411'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -113,7 +113,7 @@ def main():
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters + 1):
         theta = (train_iter / train_iters)
-        timesteps = 5 + int(10 * theta)
+        timesteps = 5 + int(5 * theta)
         encoder.train()
         decoder.train()
         transition.train()
@@ -166,9 +166,9 @@ def main():
         for t in range(timesteps):
             pred_logits = decoder(z)
 
-            #l1_penalty = theta * .01 * z.abs().mean()
-            #ts.collect('L1 t={}'.format(t), l1_penalty)
-            #loss += l1_penalty
+            l1_penalty = theta * .01 * z.abs().mean()
+            ts.collect('L1 t={}'.format(t), l1_penalty)
+            loss += l1_penalty
 
             expected = states[:, t]
             #predicted = torch.sigmoid(pred_logits)
@@ -196,9 +196,9 @@ def main():
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
 
-            #trans_l1_penalty = theta * .001 * (new_z - z).abs().mean()
-            #ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
-            #loss += trans_l1_penalty
+            trans_l1_penalty = theta * .001 * (new_z - z).abs().mean()
+            ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
+            loss += trans_l1_penalty
 
             z = new_z
 
@@ -285,6 +285,7 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
     for i in range(1, latent_dim):
         ground_truth[i] = ground_truth[0]
     zt = encoder(ground_truth)
+    zt.detach()
     #minval, maxval = decoder.to_categorical.rho.min(), decoder.to_categorical.rho.max()
     minval, maxval = -1, 1
 
@@ -313,6 +314,7 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
     states = torch.Tensor(states).cuda()
     vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:, 0])
+    z.detach()
     for t in range(timesteps - 1):
         #x_t = torch.sigmoid(decoder(z))
         x_t = decoder(z)
@@ -321,7 +323,7 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
         vid.write_frame(img.clamp_(0,1), caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
         # Predict the next latent point
         onehot_a = torch.eye(num_actions)[actions[:, t + 1]].cuda()
-        z = transition(z, onehot_a)
+        z = transition(z, onehot_a).detach()
     vid.finish()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
