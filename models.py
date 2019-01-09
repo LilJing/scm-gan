@@ -120,6 +120,10 @@ class Decoder(nn.Module):
 
     def forward(self, z_map, visual_tag=None):
         batch_size, latent_size, height, width = z_map.shape
+        if visual_tag:
+            filename = 'latent_representation_conv_{}.png'.format(visual_tag)
+            caption = 'Latent map items {}'.format(visual_tag)
+            imutil.show(z_map[0], filename=filename, img_padding=8, caption=caption, font_size=8)
 
         x = self.conv1(z_map)
         #x = self.bn_conv1(x)
@@ -131,7 +135,7 @@ class Decoder(nn.Module):
         if visual_tag:
             filename = 'separable_conv_{}.png'.format(visual_tag)
             caption = 'Separable items {}'.format(visual_tag)
-            imutil.show(x[0], filename=filename, img_padding=8, caption=caption)
+            imutil.show(x[0], filename=filename, img_padding=8, caption=caption, font_size=8)
         x = torch.sum(x, dim=1)
         return x
 

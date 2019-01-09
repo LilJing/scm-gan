@@ -267,7 +267,7 @@ def visualize_reconstruction(encoder, decoder, states, train_iter=0):
     # Image of reconstruction
     filename = 'vis_iter_{:06d}.png'.format(train_iter)
     ground_truth = states[:, 0]
-    tag = 'iter_{:06d}'.format(train_iter // 1000 * 1000)
+    tag = 'iter_{:06d}'.format(train_iter)
     logits = decoder(encoder(ground_truth, visual_tag=tag), visual_tag=tag)
     #reconstructed = torch.sigmoid(logits)
     reconstructed = logits
