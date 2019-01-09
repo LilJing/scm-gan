@@ -54,7 +54,8 @@ class Encoder(nn.Module):
         self.conv1 = nn.Conv2d(3, 32, (5,5), stride=1, padding=2)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.Conv2d(32, latent_size, (5,5), stride=1, padding=2)
+        self.conv2 = nn.Conv2d(32, 32, (5,5), stride=1, padding=2)
+        self.conv3 = nn.Conv2d(32, latent_size, (5,5), stride=1, padding=2)
 
         # Bxlatent_size
         self.cuda()
@@ -64,10 +65,12 @@ class Encoder(nn.Module):
         batch_size, channels, height, width = x.shape
 
         x = self.conv1(x)
-        #x = self.bn_conv1(x)
         x = F.leaky_relu(x)
 
         x = self.conv2(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv3(x)
         x = torch.sigmoid(x)
         return x
 
