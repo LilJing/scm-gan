@@ -44,11 +44,13 @@ class MinipongEnv():
             self.right_y -= 3
         elif a == 1:
             self.right_y += 3
+        self.right_y = max(0, min(self.right_y, GAME_SIZE))
 
         if a == 2:
             self.left_y -= 3
         elif a == 3:
             self.left_y += 3
+        self.left_y = max(0, min(self.left_y, GAME_SIZE))
 
         # Other dimensions change, but not based on agent actions
         self.ball_x += self.ball_velocity_x
