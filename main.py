@@ -88,7 +88,7 @@ def main():
     latent_dim = 16
     true_latent_dim = 4
     num_actions = 4
-    train_iters = 10 * 1000
+    train_iters = 100 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
     discriminator = models.Discriminator()
@@ -164,15 +164,14 @@ def main():
         z = encoder(states[:, 0])
         ts.collect('encoder z[0] mean', z[0].mean())
         for t in range(timesteps):
-            pred_logits = decoder(z)
+            predicted = decoder(z)
 
             l1_penalty = theta * .01 * z.abs().mean()
             ts.collect('L1 t={}'.format(t), l1_penalty)
             loss += l1_penalty
 
             expected = states[:, t]
-            #predicted = torch.sigmoid(pred_logits)
-            predicted = pred_logits
+
             # MSE loss
             rec_loss = torch.mean((expected - predicted)**2)
             # MSE loss but blurred to prevent pathological behavior
@@ -196,7 +195,7 @@ def main():
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
 
-            trans_l1_penalty = theta * .001 * (new_z - z).abs().mean()
+            trans_l1_penalty = theta * .01 * (new_z - z).abs().mean()
             ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
             loss += trans_l1_penalty
 

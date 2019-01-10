@@ -21,9 +21,13 @@ class Transition(nn.Module):
         # Input: State + Action
         # Output: State
         self.latent_size = latent_size
-        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 64, (3,3), padding=1))
-        self.conv2 = SpectralNorm(nn.Conv2d(64, 64, (3,3), padding=1))
-        self.conv3 = nn.Conv2d(64, latent_size, (3,3), padding=1)
+        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 32, (4,4), stride=2, padding=1))
+        self.conv2 = SpectralNorm(nn.Conv2d(32, 64, (4,4), stride=2, padding=1))
+        self.conv3 = SpectralNorm(nn.Conv2d(64, 128, (4,4), stride=2, padding=1))
+
+        self.conv4 = SpectralNorm(nn.ConvTranspose2d(128, 64, (4,4), stride=2, padding=1))
+        self.conv5 = SpectralNorm(nn.ConvTranspose2d(64, 32, (4,4), stride=2, padding=1))
+        self.conv6 = nn.ConvTranspose2d(32, latent_size, (4,4), stride=2, padding=1)
         self.cuda()
 
     def forward(self, z_map, actions):
@@ -42,6 +46,12 @@ class Transition(nn.Module):
         x = self.conv2(x)
         x = F.leaky_relu(x)
         x = self.conv3(x)
+        x = F.leaky_relu(x)
+        x = self.conv4(x)
+        x = F.leaky_relu(x)
+        x = self.conv5(x)
+        x = F.leaky_relu(x)
+        x = self.conv6(x)
         x = torch.sigmoid(x)
         return x
 
