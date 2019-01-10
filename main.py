@@ -111,9 +111,9 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters)
-    for train_iter in range(1, train_iters + 1):
+    for train_iter in range(0, train_iters + 1):
         theta = (train_iter / train_iters)
-        timesteps = 5 + int(5 * theta)
+        timesteps = 5 + int(25 * theta)
         encoder.train()
         decoder.train()
         transition.train()
@@ -315,14 +315,21 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
     z = encoder(states[:, 0])
     z.detach()
     for t in range(timesteps - 1):
-        #x_t = torch.sigmoid(decoder(z))
         x_t = decoder(z)
-        img = torch.cat((states[:, t][:4], x_t[:4]), dim=3)
-        caption = 'Pred. t+{} a={} min={:.2f} max={:.2f}'.format(t, actions[:4, t], img.min(), img.max())
-        vid.write_frame(img.clamp_(0,1), caption=caption, img_padding=8, font_size=10, resize_to=(800,400))
+
+        # Render top row: real video vs. simulation from initial conditions
+        pixel_view = torch.cat((states[:, t][:1], x_t[:1]), dim=3)
+        caption = 'Pred. t+{} a={} min={:.2f} max={:.2f}'.format(t, actions[:1, t], pixel_view.min(), pixel_view.max())
+        top_row = imutil.show(pixel_view.clamp_(0,1), caption=caption, img_padding=8, font_size=10, resize_to=(800,400), return_pixels=True, display=False, save=False)
+
+        # Render bottom row: Latent representation of simulation
+        bottom_row = imutil.show(z[0], resize_to=(800,800), return_pixels=True, img_padding=8, display=False, save=False)
+        vid.write_frame(np.concatenate([top_row, bottom_row], axis=0))
+
         # Predict the next latent point
         onehot_a = torch.eye(num_actions)[actions[:, t + 1]].cuda()
         z = transition(z, onehot_a).detach()
+
     vid.finish()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
