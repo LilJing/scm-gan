@@ -5,6 +5,7 @@ import gym
 app = flask.Flask(__name__)
 
 def reset_game(name='Breakout-v0'):
+    global env
     env = gym.make(name)
     state = env.reset()
     imutil.show(state, filename='static/screenshot.jpg')
@@ -32,4 +33,5 @@ def route_static(path):
     return flask.send_from_directory('static', path)
 
 if __name__ == '__main__':
+    reset_game()
     app.run('0.0.0.0', debug=True)
