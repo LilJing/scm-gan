@@ -96,8 +96,8 @@ def main():
     blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
-    load_from_dir = '.'
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_fec6f411'
+    #load_from_dir = '.'
+    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_2e87bc41'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -111,7 +111,7 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters)
-    for train_iter in range(0, train_iters + 1):
+    for train_iter in range(0, train_iters):
         theta = (train_iter / train_iters)
         timesteps = 5 + int(25 * theta)
         encoder.train()
@@ -166,9 +166,9 @@ def main():
         for t in range(timesteps):
             predicted = decoder(z)
 
-            l1_penalty = theta * .01 * z.abs().mean()
-            ts.collect('L1 t={}'.format(t), l1_penalty)
-            loss += l1_penalty
+            #l1_penalty = theta * .01 * z.abs().mean()
+            #ts.collect('L1 t={}'.format(t), l1_penalty)
+            #loss += l1_penalty
 
             expected = states[:, t]
 
@@ -267,7 +267,7 @@ def visualize_reconstruction(encoder, decoder, states, train_iter=0):
     filename = 'vis_iter_{:06d}.png'.format(train_iter)
     ground_truth = states[:, 0]
     tag = 'iter_{:06d}'.format(train_iter)
-    logits = decoder(encoder(ground_truth, visual_tag=tag), visual_tag=tag)
+    logits = decoder(encoder(ground_truth))
     #reconstructed = torch.sigmoid(logits)
     reconstructed = logits
     img = torch.cat((ground_truth[:4], reconstructed[:4]), dim=3)
@@ -311,26 +311,36 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
     print('Starting trajectory simulation for {} frames'.format(timesteps))
     states, rewards, dones, actions = datasource.get_trajectories(batch_size=64, timesteps=timesteps)
     states = torch.Tensor(states).cuda()
-    vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
+    vid_simulation = imutil.Video('simulation_only_iter_{:06d}.mp4'.format(train_iter), framerate=3)
+    vid_features = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
+    vid_separable_conv = imutil.Video('simulation_separable_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:, 0])
     z.detach()
     for t in range(timesteps - 1):
-        x_t = decoder(z)
+        x_t, x_t_separable = decoder(z, visualize=True)
 
         # Render top row: real video vs. simulation from initial conditions
         pixel_view = torch.cat((states[:, t][:1], x_t[:1]), dim=3)
         caption = 'Pred. t+{} a={} min={:.2f} max={:.2f}'.format(t, actions[:1, t], pixel_view.min(), pixel_view.max())
         top_row = imutil.show(pixel_view.clamp_(0,1), caption=caption, img_padding=8, font_size=10, resize_to=(800,400), return_pixels=True, display=False, save=False)
+        caption = 'Left: Real          Right: Simulated from initial conditions t={}'.format(t)
+        vid_simulation.write_frame(pixel_view.clamp(0, 1), caption=caption, resize_to=(1280,640))
 
-        # Render bottom row: Latent representation of simulation
+        # Render latent representation of simulation
         bottom_row = imutil.show(z[0], resize_to=(800,800), return_pixels=True, img_padding=8, display=False, save=False)
-        vid.write_frame(np.concatenate([top_row, bottom_row], axis=0))
+        vid_features.write_frame(np.concatenate([top_row, bottom_row], axis=0))
+
+        # Render pixels generated from latent representation (groupwise separable)
+        separable_output = imutil.show(x_t_separable, resize_to=(800,800), return_pixels=True, img_padding=8, display=False, save=False)
+        vid_separable_conv.write_frame(np.concatenate([top_row, separable_output], axis=0))
 
         # Predict the next latent point
         onehot_a = torch.eye(num_actions)[actions[:, t + 1]].cuda()
         z = transition(z, onehot_a).detach()
 
-    vid.finish()
+    vid_simulation.finish()
+    vid_features.finish()
+    vid_separable_conv.finish()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
 

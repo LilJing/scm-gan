@@ -70,7 +70,7 @@ class Encoder(nn.Module):
         # Bxlatent_size
         self.cuda()
 
-    def forward(self, x, visual_tag=None):
+    def forward(self, x):
         # Input: B x 1 x 64 x 64
         batch_size, channels, height, width = x.shape
 
@@ -100,7 +100,7 @@ class Discriminator(nn.Module):
 
         self.cuda()
 
-    def forward(self, x, visual_tag=None):
+    def forward(self, x):
         # Input: B x 1 x 64 x 64
         batch_size, channels, height, width = x.shape
 
@@ -128,12 +128,8 @@ class Decoder(nn.Module):
         self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*3, (5,5), stride=1, padding=2, groups=latent_size, bias=False)
         self.cuda()
 
-    def forward(self, z_map, visual_tag=None):
+    def forward(self, z_map, visualize=False):
         batch_size, latent_size, height, width = z_map.shape
-        if visual_tag:
-            filename = 'latent_representation_conv_{}.png'.format(visual_tag)
-            caption = 'Latent map items {}'.format(visual_tag)
-            imutil.show(z_map[0], filename=filename, img_padding=8, caption=caption, font_size=8)
 
         x = self.conv1(z_map)
         #x = self.bn_conv1(x)
@@ -142,11 +138,11 @@ class Decoder(nn.Module):
         x = self.conv2(x)
         # Sum the separate items
         x = x.view(batch_size, latent_size, 3, 64, 64)
-        if visual_tag:
-            filename = 'separable_conv_{}.png'.format(visual_tag)
-            caption = 'Separable items {}'.format(visual_tag)
-            imutil.show(x[0], filename=filename, img_padding=8, caption=caption, font_size=8)
+        if visualize:
+            visualization = imutil.show(x[0], img_padding=8, save=False, display=False, return_pixels=True)
         x = torch.sum(x, dim=1)
+        if visualize:
+            return x, visualization
         return x
 
 
