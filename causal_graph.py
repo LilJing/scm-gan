@@ -52,7 +52,7 @@ def render_causal_graph(scm):
     adjacency = np.zeros((rows, rows))
     adjacency[:,:cols] = scm[:]
 
-    edge_alphas = adjacency.flatten() **2
+    edge_alphas = adjacency.flatten()
 
     from networkx.classes.multidigraph import DiGraph
     G = DiGraph(np.ones(adjacency.shape))
@@ -67,7 +67,7 @@ def render_causal_graph(scm):
 
     nodes = nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color='blue')
     edges = nx.draw_networkx_edges(G, pos, node_size=node_sizes, arrowstyle='->', arrowsize=20, edge_cmap=plt.cm.Blues, width=2)
-    labels = ['$z_{}$'.format(i) for i in range(cols)] + ['$a_{}$'.format(i) for i in range(rows - cols)]
+    labels = ['$z_{{{}}}$'.format(i) for i in range(cols)] + ['$a_{{{}}}$'.format(i) for i in range(rows - cols)]
     labels = {i: labels[i] for i in range(len(labels))}
     pos = {k: (v[0], v[1] + .1) for (k,v) in pos.items()}
     nx.draw_networkx_labels(G, pos, labels, font_size=16)

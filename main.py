@@ -26,6 +26,8 @@ datasource = import_module('envs.' + sys.argv[1])
 
 import models
 
+from causal_graph import render_causal_graph
+
 
 # Inverse multiquadratic kernel with varying kernel bandwidth
 # Tolstikhin et al. https://arxiv.org/abs/1711.01558
@@ -97,7 +99,7 @@ def main():
     higgins_scores = []
 
     #load_from_dir = '.'
-    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_2e87bc41'
+    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_e82c2d10'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -113,7 +115,7 @@ def main():
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(0, train_iters):
         theta = (train_iter / train_iters)
-        timesteps = 5 + int(25 * theta)
+        timesteps = 5 + int(20 * theta)
         encoder.train()
         decoder.train()
         transition.train()
@@ -166,9 +168,9 @@ def main():
         for t in range(timesteps):
             predicted = decoder(z)
 
-            #l1_penalty = theta * .01 * z.abs().mean()
-            #ts.collect('L1 t={}'.format(t), l1_penalty)
-            #loss += l1_penalty
+            l1_penalty = theta * .01 * z.abs().mean()
+            ts.collect('L1 t={}'.format(t), l1_penalty)
+            loss += l1_penalty
 
             expected = states[:, t]
 
@@ -222,6 +224,8 @@ def main():
                 if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
                     child.momentum = 0
 
+        compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions)
+
         if train_iter % 100 == 0:
             vis = ((expected - predicted)**2)[:1]
             imutil.show(vis, filename='reconstruction_error.png')
@@ -260,6 +264,60 @@ def main():
         """
     print(ts)
     print('Finished')
+
+
+def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_actions):
+    # Generate a z and new_z by playing out two time steps
+
+    # Start with latent point t=0 (note: t=0 is a special case)
+    # Note: z_{t=0} is a special case so we use t=1 vs. t=2
+    z = encoder(states[:, 0])
+
+    # Compute z at t=1 and t=2
+    onehot_a = torch.eye(num_actions)[actions[:, 0]].cuda()
+    src_z = transition(z, onehot_a)
+    onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
+    dst_z = transition(src_z, onehot_a)
+
+    # Edge weights for the causal graph: close-to-zero weights can be pruned
+    causal_edge_weights = np.zeros(shape=(latent_dim, latent_dim))
+
+    # For each latent factor, check which other factors it "causes"
+    # by computing a counterfactual s_{t+1}
+    print("Generating counterfactual perturbations for latent factors dim {}".format(latent_dim))
+    for src_factor_idx in range(latent_dim):
+        # The next timestep (according to our model)
+        ground_truth_outcome = dst_z
+
+        # What if z[:,latent_idx] had been erased, set to zero?
+        perturbed_src_z = src_z.clone()
+        perturbed_src_z[:, src_factor_idx] = 0
+
+        # The counterfactual next timestep (according to our model)
+        counterfactual_outcome = transition(perturbed_src_z, onehot_a)
+
+        # Difference between what we normally expect to happen,
+        #  and what *would* happen IF NOT FOR the source factor
+        cf_difference = (ground_truth_outcome - counterfactual_outcome)**2
+        for dst_factor_idx in range(latent_dim):
+            edge_weight = cf_difference[:,dst_factor_idx].sum()
+            print("Factor {} -> Factor {} causal strength: {:.04f}".format(
+                src_factor_idx, dst_factor_idx, edge_weight))
+            causal_edge_weights[src_factor_idx, dst_factor_idx] = edge_weight
+    print("Finished generating counterfactual perturbations")
+
+    print("Normalizing counterfactual perturbations to max {}".format(causal_edge_weights.max()))
+    causal_edge_weights /= causal_edge_weights.max()
+
+    print('Causal Graph Edge Weights')
+    print('Latent Factor -> Latent Factor dim={}'.format(latent_dim))
+    for i in range(causal_edge_weights.shape[0]):
+        for j in range(causal_edge_weights.shape[1]):
+            print('{:.03f}\t'.format(causal_edge_weights[i,j]), end='')
+        print('')
+    graph_img = render_causal_graph(causal_edge_weights)
+    import pdb; pdb.set_trace()
+    imutil.show(graph_img, filename='causal_graph.png')
 
 
 def visualize_reconstruction(encoder, decoder, states, train_iter=0):
