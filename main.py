@@ -98,8 +98,8 @@ def main():
     blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
-    #load_from_dir = '.'
-    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_e82c2d10'
+    load_from_dir = '.'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_e82c2d10'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -113,7 +113,7 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters)
-    for train_iter in range(0, train_iters):
+    for train_iter in range(1, train_iters):
         theta = (train_iter / train_iters)
         timesteps = 5 + int(20 * theta)
         encoder.train()
@@ -250,17 +250,6 @@ def main():
         if train_iter % 1000 == 0:
             visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter)
 
-        # Periodically compute the Higgins score
-        if train_iter % 10000 == 0:
-            if not hasattr(datasource, 'simulator'):
-                print('Datasource {} does not support direct simulation, skipping disentanglement metrics'.format(datasource.__name__))
-            else:
-                trained_score = higgins_metric(datasource.simulator, true_latent_dim, encoder, latent_dim)
-                higgins_scores.append(trained_score)
-                print('Higgins metric before training: {}'.format(higgins_scores[0]))
-                print('Higgins metric after training {} iters: {}'.format(train_iter, higgins_scores[-1]))
-                print('Best Higgins: {}'.format(max(higgins_scores)))
-                ts.collect('Higgins Metric', trained_score)
     print(ts)
     print('Finished')
 
