@@ -59,7 +59,7 @@ def render_causal_graph(scm):
 
     pos = nx.layout.circular_layout(G)
 
-    node_sizes = [10 for i in range(len(G))]
+    node_sizes = [40 for i in range(len(G))]
     M = G.number_of_edges()
     #edge_colors = range(2, M + 2)
     #edge_alphas = [(5 + i) / (M + 4) for i in range(M)]

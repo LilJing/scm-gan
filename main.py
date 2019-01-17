@@ -224,14 +224,15 @@ def main():
                 if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
                     child.momentum = 0
 
-        compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions)
-
         if train_iter % 100 == 0:
             vis = ((expected - predicted)**2)[:1]
             imutil.show(vis, filename='reconstruction_error.png')
 
         if train_iter % 100 == 0:
             visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
+
+        if train_iter % 1000 == 0:
+            compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions, iter=train_iter)
 
         # Periodically generate latent space traversals
         if train_iter % 1000 == 0:
@@ -250,7 +251,6 @@ def main():
             visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter)
 
         # Periodically compute the Higgins score
-        """
         if train_iter % 10000 == 0:
             if not hasattr(datasource, 'simulator'):
                 print('Datasource {} does not support direct simulation, skipping disentanglement metrics'.format(datasource.__name__))
@@ -261,12 +261,11 @@ def main():
                 print('Higgins metric after training {} iters: {}'.format(train_iter, higgins_scores[-1]))
                 print('Best Higgins: {}'.format(max(higgins_scores)))
                 ts.collect('Higgins Metric', trained_score)
-        """
     print(ts)
     print('Finished')
 
 
-def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_actions):
+def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_actions, iter=0):
     # Generate a z and new_z by playing out two time steps
 
     # Start with latent point t=0 (note: t=0 is a special case)
@@ -316,8 +315,7 @@ def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_a
             print('{:.03f}\t'.format(causal_edge_weights[i,j]), end='')
         print('')
     graph_img = render_causal_graph(causal_edge_weights)
-    import pdb; pdb.set_trace()
-    imutil.show(graph_img, filename='causal_graph.png')
+    imutil.show(graph_img, filename='causal_graph_iter_{:06d}.png'.format(iter))
 
 
 def visualize_reconstruction(encoder, decoder, states, train_iter=0):
