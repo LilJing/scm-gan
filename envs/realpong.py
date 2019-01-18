@@ -87,11 +87,6 @@ class RealpongEnv():
 def render_state(left_y, right_y, ball_x, ball_y, ball_velocity_x, ball_velocity_y):
     state = np.ones((CHANNELS, GAME_SIZE, GAME_SIZE)) * .0
 
-    left_y = np.clip(left_y, PADDLE_HEIGHT, GAME_SIZE - PADDLE_HEIGHT)
-    right_y = np.clip(right_y, PADDLE_HEIGHT, GAME_SIZE - PADDLE_HEIGHT)
-    ball_x = np.clip(ball_x, BALL_RADIUS, GAME_SIZE - BALL_RADIUS)
-    ball_y = np.clip(ball_y, BALL_RADIUS, GAME_SIZE - BALL_RADIUS)
-
     # Blue paddle on the left, red on the right
     left_x = MARGIN_X
     right_x = GAME_SIZE - MARGIN_X
