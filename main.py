@@ -125,8 +125,8 @@ def main():
                 if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
                     child.momentum = 0.1
 
-        # Train discriminator
         """
+        # Train discriminator
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, 1)
         states = torch.Tensor(states[:, 0]).cuda()
         opt_disc.zero_grad()
@@ -141,16 +141,16 @@ def main():
         opt_disc.step()
         """
 
-        # Train the rest of the network
+        # Train encoder/transition/decoder
         opt_enc.zero_grad()
         opt_dec.zero_grad()
         opt_trans.zero_grad()
 
-        # Train decoder using discriminator
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, 1)
         states = torch.Tensor(states[:, 0]).cuda()
 
         """
+        # Train decoder using discriminator
         fake_scores = discriminator(decoder(encoder(states).detach()))
         gen_loss = .0001 * theta * torch.mean(F.relu(1 - fake_scores))
         ts.collect('D. gen', gen_loss)
@@ -159,54 +159,41 @@ def main():
 
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
         states = torch.Tensor(states).cuda()
-        # states.shape: (batch_size, timesteps, 3, 64, 64)
+        dones = torch.Tensor(dones.astype(int)).cuda()
 
-        # Predict the output of the game
-        loss = 0
+        # Encode the initial state
         z = encoder(states[:, 0])
         ts.collect('encoder z[0] mean', z[0].mean())
+
+        # Predict forward in time
+        loss = 0
+        restart_indices = []
         for t in range(timesteps):
+            # For episodes that begin at this frame, re-encode z
+            restart_indices = dones[:, t].nonzero()[:, 0]
+            if len(restart_indices) > 0:
+                z = z.clone()
+                z[restart_indices] = encoder(states[restart_indices, t])
+
             predicted = decoder(z)
 
             l1_penalty = theta * .01 * z.abs().mean()
             ts.collect('L1 t={}'.format(t), l1_penalty)
             loss += l1_penalty
-
             expected = states[:, t]
 
             # MSE loss
             rec_loss = torch.mean((expected - predicted)**2)
-            # MSE loss but blurred to prevent pathological behavior
-            #rec_loss = torch.mean((blur(expected) - blur(predicted))**2)
-            # MSE loss but weighted toward foreground pixels
-            #error_mask = torch.mean((expected - predicted) ** 2, dim=1)
-            #foreground_mask = torch.mean(blur(expected), dim=1)
-            #error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
-            #rec_loss = torch.mean(error_mask)
-
-            ts.collect('Recon. t={}'.format(t), rec_loss)
+            ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
-
-            # Latent regression loss: Don't encode non-visible information
-            #z_prime = encoder(decoder(z))
-            #latent_regression_loss = torch.mean((z - z_prime)**2)
-            #ts.collect('Latent reg. t={}'.format(t), latent_regression_loss)
-            #loss += latent_regression_loss
 
             # Predict the next latent point
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
-
             trans_l1_penalty = theta * .01 * (new_z - z).abs().mean()
             ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
             loss += trans_l1_penalty
-
             z = new_z
-
-            # Maximum Mean Discrepancy: Regularization toward gaussian
-            # mmd_loss = mmd_normal_penalty(z)
-            # ts.collect('MMD Loss t={}'.format(t), mmd_loss)
-            # loss += mmd_loss
 
         loss.backward()
 
@@ -359,7 +346,7 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
     vid_simulation = imutil.Video('simulation_only_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     vid_features = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     vid_separable_conv = imutil.Video('simulation_separable_iter_{:06d}.mp4'.format(train_iter), framerate=3)
-    z = encoder(states[:, 0])
+    z = encoder(states[:1, 0])
     z.detach()
     for t in range(timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
