@@ -90,7 +90,7 @@ def main():
     latent_dim = 16
     true_latent_dim = 4
     num_actions = 4
-    train_iters = 10 * 1000
+    train_iters = 100 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
     discriminator = models.Discriminator()

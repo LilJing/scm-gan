@@ -88,23 +88,25 @@ def render_state(left_y, right_y, ball_x, ball_y, ball_velocity_x, ball_velocity
     state = np.ones((CHANNELS, GAME_SIZE, GAME_SIZE)) * .0
 
     # Blue paddle on the left, red on the right
-    left_x = MARGIN_X
-    right_x = GAME_SIZE - MARGIN_X
-    state[2, left_y - PADDLE_HEIGHT:left_y + PADDLE_HEIGHT,
-               left_x - PADDLE_WIDTH: left_x + PADDLE_WIDTH] = 1
-    state[0, right_y - PADDLE_HEIGHT:right_y + PADDLE_HEIGHT,
-               right_x - PADDLE_WIDTH: right_x + PADDLE_WIDTH] = 1
+    draw_rect(state, MARGIN_X, left_y, PADDLE_WIDTH, PADDLE_HEIGHT, color=2)
+    draw_rect(state, GAME_SIZE - MARGIN_X, right_y, PADDLE_WIDTH, PADDLE_HEIGHT, color=0)
 
     # Green ball with a little tail to indicate direction
-    ball_color = (0, 1, 0)
-    for idx, c in enumerate(ball_color):
-        state[idx, ball_y-BALL_RADIUS:ball_y+BALL_RADIUS,
-                   ball_x-BALL_RADIUS:ball_x+BALL_RADIUS] = c
-        tail_x = ball_x - ball_velocity_x
-        tail_y = ball_y - ball_velocity_y
-        tail_size = BALL_RADIUS - 1
-        state[idx, tail_y-1:tail_y+1, tail_x-tail_size:tail_x+tail_size] = c
+    draw_rect(state, ball_x, ball_y, BALL_RADIUS, BALL_RADIUS, color=1)
+    tail_x = ball_x - ball_velocity_x
+    tail_y = ball_y - ball_velocity_y
+    tail_radius = BALL_RADIUS - 1
+    draw_rect(state, tail_x, tail_y, tail_radius, tail_radius, color=1)
     return state
+
+
+def draw_rect(pixels, center_x, center_y, width, height, color):
+    img_channels, img_height, img_width = pixels.shape
+    left = max(center_x - width, 0)
+    right = min(center_x + width, img_width - 1)
+    top = max(center_y - height, 0)
+    bottom = min(center_y + height, img_height - 1)
+    pixels[color, top:bottom, left:right] = 1
 
 
 def get_trajectories(batch_size=32, timesteps=10, policy='random'):
