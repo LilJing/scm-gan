@@ -86,10 +86,10 @@ def norm(x):
 
 
 def main():
-    batch_size = 8
+    batch_size = 64
     latent_dim = 16
     num_actions = 4
-    train_iters = 10 * 1000
+    train_iters = 100 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
     discriminator = models.Discriminator()
@@ -98,7 +98,7 @@ def main():
     higgins_scores = []
 
     load_from_dir = '.'
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_e82c2d10'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_17f99f8a'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -241,13 +241,14 @@ def main():
 
 
 def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_actions, iter=0):
-    # Generate a z and new_z by playing out two time steps
+    # TODO: manage batch size
+    assert len(states) > latent_dim
 
     # Start with latent point t=0 (note: t=0 is a special case)
     # Note: z_{t=0} is a special case so we use t=1 vs. t=2
     z = encoder(states[:, 0])
 
-    # Compute z at t=1 and t=2
+    # Compare z at t=1 and t=2 (discard t=0 because it's a special case)
     onehot_a = torch.eye(num_actions)[actions[:, 0]].cuda()
     src_z = transition(z, onehot_a)
     onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
@@ -274,7 +275,7 @@ def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_a
         #  and what *would* happen IF NOT FOR the source factor
         cf_difference = (ground_truth_outcome - counterfactual_outcome)**2
         for dst_factor_idx in range(latent_dim):
-            edge_weight = cf_difference[:,dst_factor_idx].sum()
+            edge_weight = float(cf_difference[:,dst_factor_idx].max())
             print("Factor {} -> Factor {} causal strength: {:.04f}".format(
                 src_factor_idx, dst_factor_idx, edge_weight))
             causal_edge_weights[src_factor_idx, dst_factor_idx] = edge_weight
