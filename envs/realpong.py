@@ -68,6 +68,7 @@ class RealpongEnv():
 
         # If the ball goes out of the court, the episode ends
         done = False
+        reward = 0
         if self.ball_x >= GAME_SIZE and self.ball_velocity_x > 0:
             # Blue player scores, episode is over
             reward = 1
@@ -79,7 +80,6 @@ class RealpongEnv():
             done = True
 
         self.state = render_state(self.left_y, self.right_y, self.ball_x, self.ball_y, self.ball_velocity_x, self.ball_velocity_y)
-        reward = 0
         info = {}
         return self.state, reward, done, info
 
@@ -128,3 +128,14 @@ def get_trajectories(batch_size=32, timesteps=10, policy='random'):
     dones = np.swapaxes(t_dones, 0, 1)
     actions = np.swapaxes(t_actions, 0, 1)
     return states, rewards, dones, actions
+
+
+if __name__ == '__main__':
+    states, rewards, dones, actions = get_trajectories(batch_size=1, timesteps=100)
+    import imutil
+    vid = imutil.Video('realpong.mp4', framerate=5)
+    for state, action, reward in zip(states[0], actions[0], rewards[0]):
+        pixels = np.transpose(state, (1, 2, 0))
+        caption = "Prev. Action {} Prev Reward {}".format(action, reward)
+        vid.write_frame(pixels, img_padding=8, resize_to=(512,512), caption=caption)
+    vid.finish()
