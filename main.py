@@ -86,16 +86,15 @@ def norm(x):
 
 
 def main():
-    batch_size = 64
+    batch_size = 8
     latent_dim = 16
-    true_latent_dim = 4
     num_actions = 4
-    train_iters = 100 * 1000
+    train_iters = 10 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
     discriminator = models.Discriminator()
     transition = models.Transition(latent_dim, num_actions)
-    blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
+    #blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
     load_from_dir = '.'
