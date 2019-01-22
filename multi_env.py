@@ -17,10 +17,11 @@ class MultiEnvironment():
         self.batch_size = len(envs)
         self.envs = envs
         self.reset()
+        self.action_space = self.envs[0].action_space
         #print('Initialized {} environments in {:.03f}s'.format(self.batch_size, time.time() - start_time))
 
     def reset(self):
-        map_fn(lambda x: reset_env(x), self.envs)
+        map_fn(lambda env: env.reset(), self.envs)
 
     def step(self, actions):
         start_time = time.time()
@@ -29,24 +30,13 @@ class MultiEnvironment():
         def run_one_step(env, action):
             state, reward, done, info = env.step(action)
             if done:
-                reset_env(env)
+                env.reset()
             return state, reward, done, info
 
         results = map_fn(run_one_step, self.envs, actions)
         states, rewards, dones, infos = zip(*results)
         #print('Ran {} environments one step in {:.03f}s'.format(self.batch_size, time.time() - start_time))
-        return states, rewards, dones, infos
-
-    # Pass-through for eg. env.action_space, env.observation_space
-    def __getattr__(self, name):
-        return getattr(self.envs[0], name)
-
-
-def reset_env(env):
-    env.reset()
-    # Pong: wait until the enemy paddle appears
-    #for _ in range(100):
-    #    env.step(0)
+        return np.array(states), np.array(rewards), np.array(dones), infos
 
 
 if __name__ == '__main__':
@@ -60,4 +50,3 @@ if __name__ == '__main__':
         print('Step {}, Average reward {:.02f}'.format(i, np.mean(rewards)))
         imutil.show(states)
         time.sleep(1)
-
