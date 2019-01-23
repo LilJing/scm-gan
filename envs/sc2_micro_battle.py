@@ -67,10 +67,8 @@ class MicroBattlePixels():
         return self.env.reset()
 
 
-# Hack
-batch_size=8
-envs = MultiEnvironment([MicroBattlePixels() for _ in range(batch_size)])
 def get_trajectories(batch_size=8, timesteps=10, policy='random'):
+    envs = MultiEnvironment([MicroBattlePixels() for _ in range(batch_size)])
     t_states, t_rewards, t_dones, t_actions = [], [], [], []
     for t in range(timesteps):
         if policy == 'random':

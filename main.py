@@ -145,10 +145,10 @@ def main():
         opt_dec.zero_grad()
         opt_trans.zero_grad()
 
+        """
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, 1)
         states = torch.Tensor(states[:, 0]).cuda()
 
-        """
         # Train decoder using discriminator
         fake_scores = discriminator(decoder(encoder(states).detach()))
         gen_loss = .0001 * theta * torch.mean(F.relu(1 - fake_scores))
