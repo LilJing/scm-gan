@@ -45,13 +45,13 @@ def add_to_replay_buffer(episode):
         replay_buffer[idx] = episode
 
 
-initialized = False
+simulator_running = False
 def get_trajectories(batch_size=8, timesteps=10, policy='random'):
-    global initialized
-    if not initialized:
+    global simulator_running
+    if not simulator_running:
         print('Starting simulator thread...')
         init()
-        initialized = True
+        simulator_running = True
 
     while len(replay_buffer) < batch_size:
         print('Waiting for replay buffer to fill, {}/{}...'.format(
@@ -61,11 +61,20 @@ def get_trajectories(batch_size=8, timesteps=10, policy='random'):
     # Create a batch
     states_batch, rewards_batch, dones_batch, actions_batch = [], [], [], []
     for batch_idx in range(batch_size):
-        trajectory = random.choice(replay_buffer)
-        # TODO: Handle timesteps > len(trajectory)
-        assert timesteps <= len(trajectory)
+
+        # Accumulate trajectory clips
+        trajectory = []
+        timesteps_remaining = timesteps
+        dones = []
+        while timesteps_remaining > 0:
+            selected_trajectory = random.choice(replay_buffer)
+            start_idx = np.random.randint(0, len(selected_trajectory) - 3)
+            end_idx = min(start_idx + timesteps_remaining, len(selected_trajectory) - 1)
+            duration = end_idx - start_idx
+            trajectory.extend(selected_trajectory[start_idx:end_idx])
+            dones.extend([False for _ in range(duration - 1)] + [True])
+            timesteps_remaining -= duration
         states, rewards, actions = zip(*trajectory[:timesteps])
-        dones = [False for _ in range(len(states) - 1)] + [True]
 
         states_batch.append(np.array(states))  # BHWC
         rewards_batch.append(np.array(rewards))

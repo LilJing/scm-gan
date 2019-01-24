@@ -93,8 +93,8 @@ def render_state(left_y, right_y, ball_x, ball_y, ball_velocity_x, ball_velocity
 
     # Green ball with a little tail to indicate direction
     draw_rect(state, ball_x, ball_y, BALL_RADIUS, BALL_RADIUS, color=1)
-    tail_x = ball_x - ball_velocity_x
-    tail_y = ball_y - ball_velocity_y
+    tail_x = max(0, min(ball_x - ball_velocity_x, GAME_SIZE - 1))
+    tail_y = max(0, min(ball_y - ball_velocity_y, GAME_SIZE - 1))
     tail_radius = BALL_RADIUS - 1
     draw_rect(state, tail_x, tail_y, tail_radius, tail_radius, color=1)
     return state
