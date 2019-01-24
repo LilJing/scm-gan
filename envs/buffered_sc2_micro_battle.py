@@ -45,7 +45,7 @@ def add_to_replay_buffer(episode):
 
 
 simulator_running = False
-def get_trajectories(batch_size=8, timesteps=10, policy='random'):
+def get_trajectories(batch_size=8, timesteps=10, random_start=True):
     global simulator_running
     if not simulator_running:
         print('Starting simulator thread...')
@@ -67,7 +67,10 @@ def get_trajectories(batch_size=8, timesteps=10, policy='random'):
         dones = []
         while timesteps_remaining > 0:
             selected_trajectory = random.choice(replay_buffer)
-            start_idx = np.random.randint(0, len(selected_trajectory) - 3)
+            if random_start:
+                start_idx = np.random.randint(0, len(selected_trajectory) - 3)
+            else:
+                start_idx = 0
             end_idx = min(start_idx + timesteps_remaining, len(selected_trajectory) - 1)
             duration = end_idx - start_idx
             trajectory.extend(selected_trajectory[start_idx:end_idx])

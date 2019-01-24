@@ -343,7 +343,7 @@ def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, f
 def visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter=0, timesteps=60, num_actions=4):
     start_time = time.time()
     print('Starting trajectory simulation for {} frames'.format(timesteps))
-    states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps)
+    states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps, random_start=False)
     states = torch.Tensor(states).cuda()
     vid_simulation = imutil.Video('simulation_only_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     vid_features = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
