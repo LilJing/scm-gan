@@ -26,8 +26,7 @@ def play_episode(env, policy):
     done = False
     while True:
         action = policy()
-        # Hack: extract pixels and reshape to 64x64
-        state = imutil.show(state[3], save=False, return_pixels=True, resize_to=(64,64))
+        state = state[3]  # Rendered game pixels
         state = state.transpose((2,0,1))  # HWC -> CHW
         state = state * (1/255)  # [0,1]
         trajectory.append((state, reward, action))

@@ -112,7 +112,7 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters)
-    for train_iter in range(1, train_iters):
+    for train_iter in range(0, train_iters):
         theta = (train_iter / train_iters)
         timesteps = 5 + int(5 * theta)
         encoder.train()

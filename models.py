@@ -64,8 +64,8 @@ class Encoder(nn.Module):
         self.conv1 = nn.Conv2d(3, 32, (5,5), stride=1, padding=2)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.Conv2d(32, 32, (5,5), stride=1, padding=2)
-        self.conv3 = nn.Conv2d(32, latent_size, (5,5), stride=1, padding=2)
+        self.conv2 = nn.Conv2d(32, 32, (5,5), stride=2, padding=2)
+        self.conv3 = nn.Conv2d(32, latent_size, (5,5), stride=2, padding=2)
 
         # Bxlatent_size
         self.cuda()
@@ -122,10 +122,10 @@ class Decoder(nn.Module):
         self.latent_size = latent_size
 
         # Bx1x64x64
-        self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (5,5), stride=1, padding=2, groups=latent_size, bias=False)
+        self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (4,4), stride=2, padding=2, groups=latent_size, bias=False)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*3, (5,5), stride=1, padding=2, groups=latent_size, bias=False)
+        self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*3, (4,4), stride=2, padding=2, groups=latent_size, bias=False)
         self.cuda()
 
     def forward(self, z_map, visualize=False):
