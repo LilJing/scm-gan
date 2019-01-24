@@ -8,7 +8,7 @@ from threading import Thread
 
 from sc2env.environments.micro_battle import MicroBattleEnvironment
 
-MAX_BUFFER_LEN = 1000
+MAX_BUFFER_LEN = 100
 replay_buffer = []
 
 

@@ -232,9 +232,11 @@ def main():
         if train_iter % 1000 == 0:
             compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions, iter=train_iter)
 
+        """
         # Periodically generate latent space traversals
         if train_iter % 1000 == 0:
             visualize_latent_space(states, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
+        """
 
     print(ts)
     print('Finished')
