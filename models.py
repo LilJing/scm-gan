@@ -14,6 +14,8 @@ from tqdm import tqdm
 from spatial_recurrent import CSRN
 from coordconv import CoordConv2d
 
+IMG_SIZE = 256
+
 
 class Transition(nn.Module):
     def __init__(self, latent_size, num_actions):
@@ -122,10 +124,10 @@ class Decoder(nn.Module):
         self.latent_size = latent_size
 
         # Bx1x64x64
-        self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (4,4), stride=2, padding=2, groups=latent_size, bias=False)
+        self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (4,4), stride=2, padding=1, groups=latent_size, bias=False)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*3, (4,4), stride=2, padding=2, groups=latent_size, bias=False)
+        self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*3, (4,4), stride=2, padding=1, groups=latent_size)
         self.cuda()
 
     def forward(self, z_map, visualize=False):
@@ -137,7 +139,7 @@ class Decoder(nn.Module):
 
         x = self.conv2(x)
         # Sum the separate items
-        x = x.view(batch_size, latent_size, 3, 64, 64)
+        x = x.view(batch_size, latent_size, 3, IMG_SIZE, IMG_SIZE)
         if visualize:
             visualization = imutil.show(x[0], img_padding=8, save=False, display=False, return_pixels=True)
         x = torch.sum(x, dim=1)

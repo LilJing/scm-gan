@@ -86,10 +86,10 @@ def norm(x):
 
 
 def main():
-    batch_size = 64
+    batch_size = 32
     latent_dim = 16
     num_actions = 4
-    train_iters = 100 * 1000
+    train_iters = 10 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
     discriminator = models.Discriminator()
@@ -217,15 +217,8 @@ def main():
         if train_iter % 100 == 0:
             visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
 
-        if train_iter % 1000 == 0:
-            compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions, iter=train_iter)
-
-        # Periodically generate latent space traversals
-        if train_iter % 1000 == 0:
-            visualize_latent_space(states, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
-
         # Periodically save the network
-        if train_iter % 1000 == 0:
+        if train_iter % 100 == 0:
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
@@ -233,8 +226,15 @@ def main():
             torch.save(discriminator.state_dict(), 'model-discriminator.pth')
 
         # Periodically generate simulations of the future
-        if train_iter % 1000 == 0:
+        if train_iter % 100 == 0:
             visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter)
+
+        if train_iter % 1000 == 0:
+            compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions, iter=train_iter)
+
+        # Periodically generate latent space traversals
+        if train_iter % 1000 == 0:
+            visualize_latent_space(states, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
 
     print(ts)
     print('Finished')
