@@ -1,100 +1,96 @@
+import sys
+import random
+import gym
 import time
-import json
 import numpy as np
-import os
-
 import imutil
+from threading import Thread
 
-from multi_env import MultiEnvironment
 from sc2env.environments.micro_battle import MicroBattleEnvironment
-from gym.spaces.discrete import Discrete
+
+MAX_BUFFER_LEN = 128
+replay_buffer = []
+env = MicroBattleEnvironment(render=True)
+simulation_iters = 0
 
 
-class RandomAgent():
-    def __init__(self, num_actions):
-        self.num_actions = num_actions
-
-    def step(self, state):
-        return np.random.randint(0, self.num_actions)
-
-
-def generate_trajectories(policy='random'):
-    # This environment teaches win/loss outcomes vs different enemies
-    env = MicroBattleEnvironment(render=True)
-    if policy == 'random':
-        agent = RandomAgent(num_actions=env.actions())
-
-    # TODO: after too many trajectories, restart environment
-    while True:
-        states, actions, rewards = play_episode(env, agent)
-        yield states, actions, rewards
-    print('Finished playing {} episodes'.format(train_episodes))
+# Simulate batch_size episodes and add them to the replay buffer
+def simulate_to_replay_buffer(batch_size):
+    global simulation_iters
+    global env
+    policy = lambda: env.action_space.sample()
+    for _ in range(batch_size):
+        if simulation_iters % 1000 == 0:
+            print('Rebuilding SC2 simulator...')
+            env = MicroBattleEnvironment(render=True)
+            print('Built SC2 simulator successfully')
+        play_episode(env, policy)
+        simulation_iters += 1
 
 
-def play_episode(env, agent):
-    start_time = time.time()
-    states, actions, rewards = [], [], []
+def play_episode(env, policy):
+    states, rewards, actions = [], [], []
     state = env.reset()
+    reward = 0
     done = False
-    while not done:
-        action = agent.step(state)
+    while True:
+        action = policy()
+        state = state[3]  # Rendered game pixels
+        state = state.transpose((2,0,1))  # HWC -> CHW
+        state = state * (1/255)  # [0,1]
         states.append(state)
-        state, reward, done, info = env.step(action)
-        actions.append(action)
         rewards.append(reward)
-        imutil.show(np.array(state[3]), filename='state.jpg')
-    states.append(state)
-    print('Finished episode ({} actions) in {:.3f} sec'.format(
-        len(actions), time.time() - start_time))
-    return states, actions, rewards
+        actions.append(action)
+        if done:
+            break
+        state, reward, done, info = env.step(action)
+    trajectory = (np.array(states), np.array(rewards), np.array(actions))
+    add_to_replay_buffer(trajectory)
 
 
-class MicroBattlePixels():
-    """ A wrapper that extracts only the rendered game frames """
-    def __init__(self):
-        self.env = MicroBattleEnvironment(render=True)
-        self.action_space = self.env.action_space
-        self.output_size = (64, 64)
-
-    def step(self, action):
-        state, reward, done, info = self.env.step(action)
-        feature_map, feature_screen, pixels_minimap, pixels = state
-        pixels = imutil.show(pixels, display=False, save=False, resize_to=self.output_size, return_pixels=True)
-        pixels = pixels.transpose((2,0,1)) / 255.
-        return pixels, reward, done, info
-
-    def reset(self):
-        return self.env.reset()
+def add_to_replay_buffer(episode):
+    if len(replay_buffer) < MAX_BUFFER_LEN:
+        replay_buffer.append(episode)
+    else:
+        idx = np.random.randint(1, MAX_BUFFER_LEN)
+        replay_buffer[idx] = episode
 
 
-def get_trajectories(batch_size=8, timesteps=10, policy='random'):
-    envs = MultiEnvironment([MicroBattlePixels() for _ in range(batch_size)])
-    t_states, t_rewards, t_dones, t_actions = [], [], [], []
-    for t in range(timesteps):
-        if policy == 'random':
-            actions = np.random.randint(envs.action_space.n, size=(batch_size,))
-        if policy == 'repeat':
-            actions = [i % envs.action_space.n for i in range(batch_size)]
-        print('Simulating timestep {}'.format(t))
-        states, rewards, dones, _ = envs.step(actions)
-        t_states.append(states)
-        t_rewards.append(rewards)
-        t_dones.append(dones)
-        t_actions.append(actions)
-    # Reshape to (batch_size, timesteps, ...)
-    states = np.swapaxes(t_states, 0, 1)
-    rewards = np.swapaxes(t_rewards, 0, 1)
-    dones = np.swapaxes(t_dones, 0, 1)
-    actions = np.swapaxes(t_actions, 0, 1)
-    return states, rewards, dones, actions
+def get_trajectories(batch_size=8, timesteps=10, random_start=True):
+    # Add new episodes into the replay buffer
+    simulate_to_replay_buffer(batch_size)
+
+    # Sample episodes from the replay buffer
+    states_batch, rewards_batch, dones_batch, actions_batch = [], [], [], []
+    for batch_idx in range(batch_size):
+        # Accumulate trajectory clips
+        states, rewards, actions = [], [], []
+        timesteps_remaining = timesteps
+        dones = []
+        while timesteps_remaining > 0:
+            selected_states, selected_rewards, selected_actions = random.choice(replay_buffer)
+            if random_start:
+                start_idx = np.random.randint(0, len(selected_states) - 3)
+            else:
+                start_idx = 0
+            end_idx = min(start_idx + timesteps_remaining, len(selected_states) - 1)
+            duration = end_idx - start_idx
+            states.extend(selected_states[start_idx:end_idx])
+            rewards.extend(selected_rewards[start_idx:end_idx])
+            actions.extend(selected_actions[start_idx:end_idx])
+            dones.extend([False for _ in range(duration - 1)] + [True])
+            timesteps_remaining -= duration
+
+        states_batch.append(np.array(states))  # BHWC
+        rewards_batch.append(np.array(rewards))
+        dones_batch.append(np.array(dones))
+        actions_batch.append(np.array(actions))
+    return np.array(states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
 
 
 if __name__ == '__main__':
-    states, rewards, dones, actions = get_trajectories(batch_size=1, timesteps=10)
-    import imutil
-    vid = imutil.Video('sc2_micro_battle.mp4', framerate=10)
-    for state, action, reward in zip(states[0], actions[0], rewards[0]):
-        feature_map, feature_screen, pixels_minimap, pixels = state
-        caption = "Action {} Reward {}".format(action, reward)
-        vid.write_frame(pixels, img_padding=8, resize_to=(512,512), caption=caption)
-    vid.finish()
+    start_time = time.time()
+    for i in range(100):
+        get_trajectories(batch_size=1)
+        duration = time.time() - start_time
+        print('Simulated {} games in {:.03f} sec {:.02f} games/sec'.format(i, duration, i / duration))
