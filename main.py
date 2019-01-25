@@ -97,8 +97,8 @@ def main():
     #blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
     higgins_scores = []
 
-    load_from_dir = '.'
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_17f99f8a'
+    #load_from_dir = '.'
+    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_8c4dbcab'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -112,7 +112,7 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters)
-    for train_iter in range(0, train_iters):
+    for train_iter in range(1, train_iters):
         theta = (train_iter / train_iters)
         timesteps = 5 + int(5 * theta)
         encoder.train()

@@ -8,19 +8,24 @@ from threading import Thread
 
 from sc2env.environments.micro_battle import MicroBattleEnvironment
 
-MAX_BUFFER_LEN = 100
+MAX_BUFFER_LEN = 128
 replay_buffer = []
 
 
 def play_game_thread():
-    env = MicroBattleEnvironment(render=True)
     policy = lambda: env.action_space.sample()
+    iters = 0
     while True:
+        if iters % 1000 == 0:
+            print('Rebuilding SC2 simulator...')
+            env = MicroBattleEnvironment(render=True)
+            print('Built SC2 simulator successfully')
         play_episode(env, policy)
-
+        time.sleep(.01)
+        iters += 1
 
 def play_episode(env, policy):
-    trajectory = []
+    states, rewards, actions = [], [], []
     state = env.reset()
     reward = 0
     done = False
@@ -29,10 +34,13 @@ def play_episode(env, policy):
         state = state[3]  # Rendered game pixels
         state = state.transpose((2,0,1))  # HWC -> CHW
         state = state * (1/255)  # [0,1]
-        trajectory.append((state, reward, action))
+        states.append(state)
+        rewards.append(reward)
+        actions.append(action)
         if done:
             break
         state, reward, done, info = env.step(action)
+    trajectory = (np.array(states), np.array(rewards), np.array(actions))
     add_to_replay_buffer(trajectory)
 
 
@@ -60,23 +68,23 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
     # Create a batch
     states_batch, rewards_batch, dones_batch, actions_batch = [], [], [], []
     for batch_idx in range(batch_size):
-
         # Accumulate trajectory clips
-        trajectory = []
+        states, rewards, actions = [], [], []
         timesteps_remaining = timesteps
         dones = []
         while timesteps_remaining > 0:
-            selected_trajectory = random.choice(replay_buffer)
+            selected_states, selected_rewards, selected_actions = random.choice(replay_buffer)
             if random_start:
-                start_idx = np.random.randint(0, len(selected_trajectory) - 3)
+                start_idx = np.random.randint(0, len(selected_states) - 3)
             else:
                 start_idx = 0
-            end_idx = min(start_idx + timesteps_remaining, len(selected_trajectory) - 1)
+            end_idx = min(start_idx + timesteps_remaining, len(selected_states) - 1)
             duration = end_idx - start_idx
-            trajectory.extend(selected_trajectory[start_idx:end_idx])
+            states.extend(selected_states[start_idx:end_idx])
+            rewards.extend(selected_rewards[start_idx:end_idx])
+            actions.extend(selected_actions[start_idx:end_idx])
             dones.extend([False for _ in range(duration - 1)] + [True])
             timesteps_remaining -= duration
-        states, rewards, actions = zip(*trajectory[:timesteps])
 
         states_batch.append(np.array(states))  # BHWC
         rewards_batch.append(np.array(rewards))
