@@ -1,14 +1,15 @@
 import sys
+import math
 import random
-import gym
 import time
 import numpy as np
-import imutil
-from threading import Thread
 
 from sc2env.environments.micro_battle import MicroBattleEnvironment
 
-MAX_BUFFER_LEN = 128
+REPLAY_FACTOR = 4
+REPLAY_BUFFER_LEN = 128
+MAX_TRAJECTORY_LEN = 100
+MAX_EPISODES_PER_ENVIRONMENT = 500
 replay_buffer = []
 env = MicroBattleEnvironment(render=True)
 simulation_iters = 0
@@ -20,8 +21,9 @@ def simulate_to_replay_buffer(batch_size):
     global env
     policy = lambda: env.action_space.sample()
     for _ in range(batch_size):
-        if simulation_iters % 1000 == 0:
+        if simulation_iters % MAX_EPISODES_PER_ENVIRONMENT == 0:
             print('Rebuilding SC2 simulator...')
+            env.sc2env.close()
             env = MicroBattleEnvironment(render=True)
             print('Built SC2 simulator successfully')
         play_episode(env, policy)
@@ -41,6 +43,9 @@ def play_episode(env, policy):
         states.append(state)
         rewards.append(reward)
         actions.append(action)
+        if len(states) >= MAX_TRAJECTORY_LEN:
+            print('Warning: ending trajectory at {} timesteps'.format(len(states)))
+            done = True
         if done:
             break
         state, reward, done, info = env.step(action)
@@ -49,16 +54,18 @@ def play_episode(env, policy):
 
 
 def add_to_replay_buffer(episode):
-    if len(replay_buffer) < MAX_BUFFER_LEN:
+    if len(replay_buffer) < REPLAY_BUFFER_LEN:
         replay_buffer.append(episode)
     else:
-        idx = np.random.randint(1, MAX_BUFFER_LEN)
+        idx = np.random.randint(1, REPLAY_BUFFER_LEN)
         replay_buffer[idx] = episode
 
 
 def get_trajectories(batch_size=8, timesteps=10, random_start=True):
-    # Add new episodes into the replay buffer
-    simulate_to_replay_buffer(batch_size)
+    # Run the game and add new episodes into the replay buffer
+    simulation_count = math.ceil(batch_size / REPLAY_FACTOR)
+    simulation_count = max(batch_size - len(replay_buffer), simulation_count)
+    simulate_to_replay_buffer(simulation_count)
 
     # Sample episodes from the replay buffer
     states_batch, rewards_batch, dones_batch, actions_batch = [], [], [], []
@@ -90,7 +97,9 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
 
 if __name__ == '__main__':
     start_time = time.time()
-    for i in range(100):
-        get_trajectories(batch_size=1)
+    batch_size = 8
+    MAX_ITERS = 1000 * 10
+    for i in range(0, MAX_ITERS, batch_size):
+        get_trajectories(batch_size)
         duration = time.time() - start_time
-        print('Simulated {} games in {:.03f} sec {:.02f} games/sec'.format(i, duration, i / duration))
+        print('Generated {} trajectories in {:.03f} sec {:.02f} traj/sec'.format(i, duration, i / duration))
