@@ -34,6 +34,9 @@ def simulate_to_replay_buffer(batch_size):
 def play_episode(env, policy):
     states, rewards, actions = [], [], []
     state = env.reset()
+    # hack: skip first few steps
+    for _ in range(3):
+        state, _, _, _ = env.step(0)
     reward = 0
     done = False
     while True:

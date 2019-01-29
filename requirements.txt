@@ -4,4 +4,5 @@ networkx
 matplotlib
 imutil
 git+https://github.com/lwneal/logutil
+git+https://github.com/osu-xai/sc2env
 

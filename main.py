@@ -114,7 +114,7 @@ def main():
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters):
         theta = (train_iter / train_iters)
-        timesteps = 5 + int(5 * theta)
+        timesteps = 5 + int(10 * theta)
         encoder.train()
         decoder.train()
         transition.train()
