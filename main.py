@@ -88,7 +88,7 @@ def norm(x):
 def main():
     batch_size = 32
     latent_dim = 16
-    num_actions = 4
+    num_actions = 6
     train_iters = 10 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
@@ -183,6 +183,13 @@ def main():
 
             # MSE loss
             rec_loss = torch.mean((expected - predicted)**2)
+
+            # MSE weighted toward foreground (nonzero) pixels
+            #error_mask = torch.mean((expected - predicted) ** 2, dim=1)
+            #foreground_mask = torch.mean(blur(expected), dim=1)
+            #theta = 0.1 + 0.9 * (train_iter / train_iters)
+            #error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
+            #rec_loss = torch.mean(error_mask)
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
 
@@ -227,7 +234,7 @@ def main():
 
         # Periodically generate simulations of the future
         if train_iter % 100 == 0:
-            visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter)
+            visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter, num_actions=num_actions)
 
         if train_iter % 1000 == 0:
             compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions, iter=train_iter)

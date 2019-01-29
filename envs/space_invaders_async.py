@@ -48,12 +48,13 @@ def play_episode(env, policy):
     done = False
     while True:
         action = policy()
-        state = imutil.show(state, resize_to=(256,256), display=False, save=False, return_pixels=True)
+        state = imutil.show(state, resize_to=(128,128), display=False, save=False, return_pixels=True)
+        state = state.transpose((2,0,1)) / 255.
         states.append(state)
         rewards.append(reward)
         actions.append(action)
         if len(states) >= MAX_TRAJECTORY_LEN:
-            print('Warning: ending trajectory at {} timesteps'.format(len(states)))
+            #print('Warning: ending trajectory at {} timesteps'.format(len(states)))
             done = True
         if done:
             break
@@ -76,8 +77,9 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
 
     # Run the game and add new episodes into the replay buffer
     while len(replay_buffer) < batch_size:
-        print('Waiting for simulator, buffer size {}...'.format(len(replay_buffer)))
-        time.sleep(0.5)
+        print('Waiting for replay buffer to fill, buffer size {}/{}...'.format(
+            len(replay_buffer), batch_size))
+        time.sleep(1)
 
     # Sample episodes from the replay buffer
     states_batch, rewards_batch, dones_batch, actions_batch = [], [], [], []
