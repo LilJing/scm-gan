@@ -11,7 +11,7 @@ REPLAY_BUFFER_LEN = 128
 MAX_TRAJECTORY_LEN = 100
 MAX_EPISODES_PER_ENVIRONMENT = 500
 replay_buffer = []
-env = MicroBattleEnvironment(render=True)
+env = None
 simulation_iters = 0
 
 
@@ -22,8 +22,9 @@ def simulate_to_replay_buffer(batch_size):
     policy = lambda: env.action_space.sample()
     for _ in range(batch_size):
         if simulation_iters % MAX_EPISODES_PER_ENVIRONMENT == 0:
-            print('Rebuilding SC2 simulator...')
-            env.sc2env.close()
+            print('At iteration {}, rebuilding SC2 simulator...'.format(simulation_iters))
+            if env:
+                env.sc2env.close()
             env = MicroBattleEnvironment(render=True)
             print('Built SC2 simulator successfully')
         play_episode(env, policy)
