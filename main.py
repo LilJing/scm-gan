@@ -176,7 +176,7 @@ def main():
 
             predicted = decoder(z)
 
-            l1_penalty = theta * .01 * z.abs().mean()
+            l1_penalty = theta * .0001 * z.abs().mean()
             ts.collect('L1 t={}'.format(t), l1_penalty)
             loss += l1_penalty
             expected = states[:, t]
@@ -189,7 +189,7 @@ def main():
             # Predict the next latent point
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
-            trans_l1_penalty = theta * .01 * (new_z - z).abs().mean()
+            trans_l1_penalty = theta * .0001 * (new_z - z).abs().mean()
             ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
             loss += trans_l1_penalty
             z = new_z

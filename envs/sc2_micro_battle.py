@@ -6,8 +6,8 @@ import numpy as np
 
 from sc2env.environments.micro_battle import MicroBattleEnvironment
 
-REPLAY_FACTOR = 4
-REPLAY_BUFFER_LEN = 128
+REPLAY_FACTOR = 8
+REPLAY_BUFFER_LEN = 500
 MAX_TRAJECTORY_LEN = 100
 MAX_EPISODES_PER_ENVIRONMENT = 500
 replay_buffer = []
@@ -44,6 +44,8 @@ def play_episode(env, policy):
         state = state[3]  # Rendered game pixels
         state = state.transpose((2,0,1))  # HWC -> CHW
         state = state * (1/255)  # [0,1]
+        state[:, :80] = 0
+        state[:, -80:] = 0
         states.append(state)
         rewards.append(reward)
         actions.append(action)

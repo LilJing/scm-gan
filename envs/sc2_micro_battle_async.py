@@ -7,7 +7,6 @@ from threading import Thread
 
 from sc2env.environments.micro_battle import MicroBattleEnvironment
 
-REPLAY_FACTOR = 8
 REPLAY_BUFFER_LEN = 500
 MAX_TRAJECTORY_LEN = 100
 MAX_EPISODES_PER_ENVIRONMENT = 500
