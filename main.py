@@ -1,11 +1,24 @@
+import argparse
+
+parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
+parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-v0, etc (see envs/ for list)')
+args = parser.parse_args()
+
+def select_environment(env_name):
+    from importlib import import_module
+    if env_name.endswith('v0') or env_name.endswith('v4'):
+        datasource = import_module('envs.gym')
+        datasource.ENV_NAME = env_name
+    else:
+        datasource = import_module('envs.' + sys.argv[1])
+    return datasource
+
+datasource = select_environment(args.env)
+
 import time
 import math
 import os
 import sys
-if len(sys.argv) < 2:
-    print('Usage: {} datasource'.format(sys.argv[0]))
-    print('\tAvailable datasources: boxes, minipong, mediumpong...')
-    exit(1)
 
 import numpy as np
 import torch
@@ -20,9 +33,6 @@ from spatial_recurrent import CSRN
 from coordconv import CoordConv2d
 
 from higgins import higgins_metric
-
-from importlib import import_module
-datasource = import_module('envs.' + sys.argv[1])
 
 import models
 
