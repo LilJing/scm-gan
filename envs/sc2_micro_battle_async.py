@@ -7,9 +7,11 @@ from threading import Thread
 
 from sc2env.environments.micro_battle import MicroBattleEnvironment
 
-REPLAY_BUFFER_LEN = 500
+REPLAY_BUFFER_LEN = 200
 MAX_TRAJECTORY_LEN = 100
 MAX_EPISODES_PER_ENVIRONMENT = 500
+NUM_ACTIONS = 2
+
 replay_buffer = []
 initialized = False
 env = None
@@ -49,7 +51,7 @@ def play_episode(env, policy):
     states, rewards, actions = [], [], []
     state = env.reset()
     # hack: skip first few steps
-    for _ in range(3):
+    for _ in range(10):
         state, _, _, _ = env.step(0)
     reward = 0
     done = False
@@ -57,9 +59,8 @@ def play_episode(env, policy):
         action = policy()
         state = state[3]  # Rendered game pixels
         state = state.transpose((2,0,1))  # HWC -> CHW
+        state = state[:,64:192,64:192]  # subsample to 128x128
         state = state * (1/255)  # [0,1]
-        state[:, :80] = 0
-        state[:, -80:] = 0
         states.append(state)
         rewards.append(reward)
         actions.append(action)

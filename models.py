@@ -15,6 +15,7 @@ from spatial_recurrent import CSRN
 from coordconv import CoordConv2d
 
 IMG_SIZE = 128
+INPUT_CHANNELS = 3
 
 
 class Transition(nn.Module):
@@ -63,7 +64,7 @@ class Encoder(nn.Module):
         super().__init__()
         self.latent_size = latent_size
         # Bx1x64x64
-        self.conv1 = nn.Conv2d(3, 32, (5,5), stride=1, padding=2)
+        self.conv1 = nn.Conv2d(INPUT_CHANNELS, 32, (5,5), stride=1, padding=2)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
         self.conv2 = nn.Conv2d(32, 32, (5,5), stride=1, padding=2)
@@ -143,7 +144,7 @@ class Decoder(nn.Module):
         x = x.view(batch_size, latent_size, 3, IMG_SIZE, IMG_SIZE)
 
         # Optional: Learn to subtract static background, separate from objects
-        x = x + self.bg
+        #x = x + self.bg
         if visualize:
             visualization = imutil.show(x[0], img_padding=8, save=False, display=False, return_pixels=True)
         x = torch.sum(x, dim=1)

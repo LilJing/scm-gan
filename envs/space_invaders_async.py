@@ -6,7 +6,6 @@ import numpy as np
 from threading import Thread
 
 import imutil
-#from sc2env.environments.micro_battle import MicroBattleEnvironment
 import gym
 
 REPLAY_BUFFER_LEN = 100
@@ -54,8 +53,7 @@ def play_episode(env, policy):
     done = False
     while True:
         action = policy()
-        state = imutil.show(state, resize_to=(128,128), display=False, save=False, return_pixels=True)
-        state = state.transpose((2,0,1)) / 255.
+        state = convert_atari_frame(state)
         states.append(state)
         rewards.append(reward)
         actions.append(action)
@@ -113,6 +111,12 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
         dones_batch.append(np.array(dones))
         actions_batch.append(np.array(actions))
     return np.array(states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
+
+
+def convert_atari_frame(state, width=128, height=128):
+    state = imutil.get_pixels(state, width, height)
+    state = state.transpose((2,0,1))
+    return state
 
 
 if __name__ == '__main__':
