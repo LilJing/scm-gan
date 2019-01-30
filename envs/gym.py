@@ -9,6 +9,7 @@ import imutil
 import gym
 
 REPLAY_BUFFER_LEN = 100
+MIN_REPLAY_BUFFER_LEN = 4
 MAX_TRAJECTORY_LEN = 200
 MAX_EPISODES_PER_ENVIRONMENT = 500
 BURN_STATES_BEFORE_START = 50
@@ -80,9 +81,9 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
         init()
 
     # Run the game and add new episodes into the replay buffer
-    while len(replay_buffer) < batch_size:
+    while len(replay_buffer) < MIN_REPLAY_BUFFER_LEN:
         print('Waiting for replay buffer to fill, buffer size {}/{}...'.format(
-            len(replay_buffer), batch_size))
+            len(replay_buffer), MIN_REPLAY_BUFFER_LEN))
         time.sleep(1)
 
     # Sample episodes from the replay buffer
