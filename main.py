@@ -7,7 +7,7 @@ args = parser.parse_args()
 def select_environment(env_name):
     from importlib import import_module
     if env_name.endswith('v0') or env_name.endswith('v4'):
-        datasource = import_module('envs.gym')
+        datasource = import_module('envs.gym_make')
         datasource.ENV_NAME = env_name
     else:
         datasource = import_module('envs.' + sys.argv[1])

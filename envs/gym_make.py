@@ -18,12 +18,14 @@ NUM_ACTIONS = 6
 
 replay_buffer = []
 initialized = False
-env = gym.make(ENV_NAME)
 simulation_iters = 0
+env = None
 
 
 def init():
+    global env
     global initialized
+    env = gym.make(ENV_NAME)
     thread = Thread(target=play_game_thread)
     thread.daemon = True  # hack to kill on ctrl+C
     thread.start()
@@ -59,7 +61,6 @@ def play_episode(env, policy):
         rewards.append(reward)
         actions.append(action)
         if len(states) >= MAX_TRAJECTORY_LEN:
-            #print('Warning: ending trajectory at {} timesteps'.format(len(states)))
             done = True
         if done:
             break
@@ -121,9 +122,10 @@ def convert_atari_frame(state, width=128, height=128):
 
 
 if __name__ == '__main__':
+    ENV_NAME = sys.argv[1]
     start_time = time.time()
     batch_size = 8
-    MAX_ITERS = 1000 * 10
+    MAX_ITERS = 1000
     for i in range(0, MAX_ITERS, batch_size):
         get_trajectories(batch_size)
         duration = time.time() - start_time
