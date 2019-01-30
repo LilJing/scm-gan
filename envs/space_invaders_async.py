@@ -9,12 +9,16 @@ import imutil
 #from sc2env.environments.micro_battle import MicroBattleEnvironment
 import gym
 
-REPLAY_BUFFER_LEN = 500
+REPLAY_BUFFER_LEN = 100
 MAX_TRAJECTORY_LEN = 200
 MAX_EPISODES_PER_ENVIRONMENT = 500
+BURN_STATES_BEFORE_START = 50
+ENV_NAME = 'SpaceInvadersDeterministic-v4'
+NUM_ACTIONS = 6
+
 replay_buffer = []
 initialized = False
-env = gym.make('SpaceInvaders-v0')
+env = gym.make(ENV_NAME)
 simulation_iters = 0
 
 
@@ -44,6 +48,8 @@ def simulate_to_replay_buffer(batch_size):
 def play_episode(env, policy):
     states, rewards, actions = [], [], []
     state = env.reset()
+    for _ in range(BURN_STATES_BEFORE_START):
+        state, _, _, _ = env.step(action=0)
     reward = 0
     done = False
     while True:

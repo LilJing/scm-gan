@@ -143,7 +143,7 @@ class Decoder(nn.Module):
         x = x.view(batch_size, latent_size, 3, IMG_SIZE, IMG_SIZE)
 
         # Optional: Learn to subtract static background, separate from objects
-        #x = x + self.bg
+        x = x + self.bg
         if visualize:
             visualization = imutil.show(x[0], img_padding=8, save=False, display=False, return_pixels=True)
         x = torch.sum(x, dim=1)

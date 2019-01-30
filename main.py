@@ -88,7 +88,7 @@ def norm(x):
 def main():
     batch_size = 32
     latent_dim = 16
-    num_actions = 6
+    num_actions = datasource.NUM_ACTIONS
     train_iters = 10 * 1000
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
