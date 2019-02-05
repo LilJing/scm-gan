@@ -1,24 +1,24 @@
 import argparse
+from importlib import import_module
 
 parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
 parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-v0, etc (see envs/ for list)')
 args = parser.parse_args()
 
 def select_environment(env_name):
-    from importlib import import_module
     if env_name.endswith('v0') or env_name.endswith('v4'):
         datasource = import_module('envs.gym_make')
         datasource.ENV_NAME = env_name
     else:
-        datasource = import_module('envs.' + sys.argv[1])
+        datasource = import_module('envs.' + env_name)
     return datasource
 
 datasource = select_environment(args.env)
 
+
 import time
 import math
 import os
-import sys
 
 import numpy as np
 import torch
@@ -194,12 +194,6 @@ def main():
             # MSE loss
             rec_loss = torch.mean((expected - predicted)**2)
 
-            # MSE weighted toward foreground (nonzero) pixels
-            #error_mask = torch.mean((expected - predicted) ** 2, dim=1)
-            #foreground_mask = torch.mean(blur(expected), dim=1)
-            #theta = 0.1 + 0.9 * (train_iter / train_iters)
-            #error_mask = theta * error_mask + (1 - theta) * (error_mask * foreground_mask)
-            #rec_loss = torch.mean(error_mask)
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
 
