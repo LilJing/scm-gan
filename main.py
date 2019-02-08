@@ -1,20 +1,6 @@
 import argparse
 from importlib import import_module
-
-parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
-parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-v0, etc (see envs/ for list)')
-args = parser.parse_args()
-
-def select_environment(env_name):
-    if env_name.endswith('v0') or env_name.endswith('v4'):
-        datasource = import_module('envs.gym_make')
-        datasource.ENV_NAME = env_name
-    else:
-        datasource = import_module('envs.' + env_name)
-    return datasource
-
-datasource = select_environment(args.env)
-
+import sc2env
 
 import time
 import math
@@ -37,6 +23,23 @@ from higgins import higgins_metric
 import models
 
 from causal_graph import render_causal_graph
+
+
+
+parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
+parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-v0, etc (see envs/ for list)')
+args = parser.parse_args()
+
+def select_environment(env_name):
+    if env_name.endswith('v0') or env_name.endswith('v4'):
+        datasource = import_module('envs.gym_make')
+        datasource.ENV_NAME = env_name
+    else:
+        datasource = import_module('envs.' + env_name)
+    return datasource
+
+datasource = select_environment(args.env)
+
 
 
 # Inverse multiquadratic kernel with varying kernel bandwidth
