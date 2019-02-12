@@ -20,6 +20,7 @@ replay_buffer = []
 initialized = False
 simulation_iters = 0
 env = None
+policy = None
 
 
 def init():
@@ -41,7 +42,11 @@ def play_game_thread():
 def simulate_to_replay_buffer(batch_size):
     global simulation_iters
     global env
-    policy = lambda: env.action_space.sample()
+    global policy
+    def default_policy(*args, **kwargs):
+        return env.action_space.sample()
+    if policy is None:
+        policy = default_policy
     for _ in range(batch_size):
         play_episode(env, policy)
         simulation_iters += 1
@@ -55,7 +60,7 @@ def play_episode(env, policy):
     reward = 0
     done = False
     while True:
-        action = policy()
+        action = policy(state)
         state = convert_atari_frame(state)
         states.append(state)
         rewards.append(reward)

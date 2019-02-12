@@ -98,6 +98,39 @@ def norm(x):
     return x
 
 
+def cov(m, rowvar=False):
+    '''Estimate a covariance matrix given data.
+
+    Covariance indicates the level to which two variables vary together.
+    If we examine N-dimensional samples, `X = [x_1, x_2, ... x_N]^T`,
+    then the covariance matrix element `C_{ij}` is the covariance of
+    `x_i` and `x_j`. The element `C_{ii}` is the variance of `x_i`.
+
+    Args:
+        m: A 1-D or 2-D array containing multiple variables and observations.
+            Each row of `m` represents a variable, and each column a single
+            observation of all those variables.
+        rowvar: If `rowvar` is True, then each row represents a
+            variable, with observations in the columns. Otherwise, the
+            relationship is transposed: each column represents a variable,
+            while the rows contain observations.
+
+    Returns:
+        The covariance matrix of the variables.
+    '''
+    if m.dim() > 2:
+        raise ValueError('m has more than 2 dimensions')
+    if m.dim() < 2:
+        m = m.view(1, -1)
+    if not rowvar and m.size(0) != 1:
+        m = m.t()
+    # m = m.type(torch.double)  # uncomment this line if desired
+    fact = 1.0 / (m.size(1) - 1)
+    m -= torch.mean(m, dim=1, keepdim=True)
+    mt = m.t()  # if complex: mt = m.t().conj()
+    return fact * m.matmul(mt).squeeze()
+
+
 def main():
     batch_size = 32
     latent_dim = 16
@@ -111,7 +144,7 @@ def main():
     higgins_scores = []
 
     load_from_dir = '.'
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_8c4dbcab'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_a3ad2d0c'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -126,8 +159,9 @@ def main():
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters):
-        theta = (train_iter / train_iters)
-        timesteps = 5 + int(10 * theta)
+        #theta = (train_iter / train_iters)
+        theta = 0.5
+        timesteps = 5 + int(5 * theta)
         encoder.train()
         decoder.train()
         transition.train()
@@ -189,7 +223,18 @@ def main():
 
             predicted = decoder(z)
 
-            l1_penalty = theta * .0001 * z.abs().mean()
+            # Log-Det independence loss
+            # Applies independently to each position in z
+            # TODO: sample a subset of z values uniformly from the batch
+            #z_samples = z.view(-1, latent_dim).permute(1, 0)[:, :1000].clone()
+            #covariance = cov(z_samples)
+            # The gradient of -log(det(X_ij)) is just X_ij
+            #log_det_penalty = theta * .1 * covariance.mean()
+            #ts.collect('Log-Det t={}'.format(t), log_det_penalty)
+            #loss += log_det_penalty
+
+            # L1 Sparsity loss
+            l1_penalty = theta * .001 * z.abs().mean()
             ts.collect('L1 t={}'.format(t), l1_penalty)
             loss += l1_penalty
             expected = states[:, t]
@@ -203,7 +248,9 @@ def main():
             # Predict the next latent point
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
-            trans_l1_penalty = theta * .0001 * (new_z - z).abs().mean()
+
+            # Transition L1 sparsity loss
+            trans_l1_penalty = theta * .001 * (new_z - z).abs().mean()
             ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
             loss += trans_l1_penalty
             z = new_z
