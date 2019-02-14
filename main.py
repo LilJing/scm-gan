@@ -77,11 +77,11 @@ def main():
 
         # Encode the initial state
         z = encoder(states[:, 0])
-        ts.collect('encoder z[0] mean', z[0].mean())
 
-        # Predict forward in time
         loss = 0
+        # Predict forward in time from t=0
         restart_indices = []
+        predicted_z_from_zero = []
         for t in range(timesteps):
             # For episodes that begin at this frame, re-encode z
             restart_indices = dones[:, t].nonzero()[:, 0]
@@ -98,6 +98,29 @@ def main():
 
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
+
+            predicted_z_from_zero.append(z)
+            z = transition(z, onehot_a)
+
+        predicted_z_from_one = []
+        for t in range(1, timesteps):
+            # For episodes that begin at this frame, re-encode z
+            restart_indices = dones[:, t].nonzero()[:, 0]
+            if len(restart_indices) > 0:
+                z = z.clone()
+                z[restart_indices] = encoder(states[restart_indices, t])
+            predicted = decoder(z)
+
+            # Temporal Difference loss
+            expected = z
+            predicted = predicted_z_from_zero[t-1]
+            td_loss = torch.mean((expected - predicted)**2)
+            ts.collect('TD 2:1 t={}'.format(t), td_loss)
+            loss += td_loss
+
+            # Predict transition
+            onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
+            predicted_z_from_one.append(z)
             z = transition(z, onehot_a)
 
         loss.backward()
