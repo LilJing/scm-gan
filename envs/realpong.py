@@ -11,6 +11,7 @@ GAME_SIZE = 64
 PADDLE_WIDTH = 1
 PADDLE_HEIGHT = 4
 BALL_RADIUS = 2
+NUM_ACTIONS = 4
 
 MARGIN_Y = 4
 MARGIN_X = 5
@@ -109,7 +110,7 @@ def draw_rect(pixels, center_x, center_y, width, height, color):
     pixels[color, top:bottom, left:right] = 1
 
 
-def get_trajectories(batch_size=32, timesteps=10, policy='random'):
+def get_trajectories(batch_size=32, timesteps=10, policy='random', random_start=False):
     envs = MultiEnvironment([RealpongEnv() for _ in range(batch_size)])
     t_states, t_rewards, t_dones, t_actions = [], [], [], []
     for t in range(timesteps):

@@ -1,6 +1,5 @@
 import argparse
 from importlib import import_module
-import sc2env
 
 import time
 import math
@@ -12,23 +11,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+import sc2env
 import imutil
 from logutil import TimeSeries
-from tqdm import tqdm
-from spatial_recurrent import CSRN
-from coordconv import CoordConv2d
-
-from higgins import higgins_metric
 
 import models
-
 from causal_graph import render_causal_graph
-
 
 
 parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
 parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-v0, etc (see envs/ for list)')
 args = parser.parse_args()
+
 
 def select_environment(env_name):
     if env_name.endswith('v0') or env_name.endswith('v4'):
@@ -38,110 +32,18 @@ def select_environment(env_name):
         datasource = import_module('envs.' + env_name)
     return datasource
 
-datasource = select_environment(args.env)
-
-
-
-# Inverse multiquadratic kernel with varying kernel bandwidth
-# Tolstikhin et al. https://arxiv.org/abs/1711.01558
-# https://github.com/schelotto/Wasserstein_Autoencoders
-def imq_kernel(X: torch.Tensor,
-               Y: torch.Tensor,
-               h_dim: int):
-    batch_size = X.size(0)
-
-    p2_norm_x = X.pow(2).sum(1).unsqueeze(0)
-    norms_x = X.sum(1).unsqueeze(0)
-    prods_x = torch.mm(norms_x, norms_x.t())
-    dists_x = p2_norm_x + p2_norm_x.t() - 2 * prods_x
-
-    p2_norm_y = Y.pow(2).sum(1).unsqueeze(0)
-    norms_y = X.sum(1).unsqueeze(0)
-    prods_y = torch.mm(norms_y, norms_y.t())
-    dists_y = p2_norm_y + p2_norm_y.t() - 2 * prods_y
-
-    dot_prd = torch.mm(norms_x, norms_y.t())
-    dists_c = p2_norm_x + p2_norm_y.t() - 2 * dot_prd
-
-    stats = 0
-    for scale in [.1, .2, .5, 1., 2., 5., 10.]:
-        C = 2 * h_dim * 1.0 * scale
-        res1 = C / (C + dists_x)
-        res1 += C / (C + dists_y)
-
-        if torch.cuda.is_available():
-            res1 = (1 - torch.eye(batch_size).cuda()) * res1
-        else:
-            res1 = (1 - torch.eye(batch_size)) * res1
-
-        res1 = res1.sum() / (batch_size - 1)
-        res2 = C / (C + dists_c)
-        res2 = res2.sum() * 2. / (batch_size)
-        stats += res1 - res2
-    return stats
-
-
-# Maximum Mean Discrepancy between z and a reference distribution
-# This term goes to zero if z is perfectly normal (with variance sigma**2)
-def mmd_normal_penalty(z, sigma=1.0):
-    batch_size, latent_dim = z.shape
-    z_fake = torch.randn(batch_size, latent_dim).cuda() * sigma
-    #z_fake = norm(z_fake)
-    mmd_loss = -imq_kernel(z, z_fake, h_dim=latent_dim)
-    return mmd_loss.mean()
-
-
-# Normalize a batch of latent points to the unit hypersphere
-def norm(x):
-    norm = torch.norm(x, p=2, dim=1)
-    x = x / (norm.expand(1, -1).t() + .0001)
-    return x
-
-
-def cov(m, rowvar=False):
-    '''Estimate a covariance matrix given data.
-
-    Covariance indicates the level to which two variables vary together.
-    If we examine N-dimensional samples, `X = [x_1, x_2, ... x_N]^T`,
-    then the covariance matrix element `C_{ij}` is the covariance of
-    `x_i` and `x_j`. The element `C_{ii}` is the variance of `x_i`.
-
-    Args:
-        m: A 1-D or 2-D array containing multiple variables and observations.
-            Each row of `m` represents a variable, and each column a single
-            observation of all those variables.
-        rowvar: If `rowvar` is True, then each row represents a
-            variable, with observations in the columns. Otherwise, the
-            relationship is transposed: each column represents a variable,
-            while the rows contain observations.
-
-    Returns:
-        The covariance matrix of the variables.
-    '''
-    if m.dim() > 2:
-        raise ValueError('m has more than 2 dimensions')
-    if m.dim() < 2:
-        m = m.view(1, -1)
-    if not rowvar and m.size(0) != 1:
-        m = m.t()
-    # m = m.type(torch.double)  # uncomment this line if desired
-    fact = 1.0 / (m.size(1) - 1)
-    m -= torch.mean(m, dim=1, keepdim=True)
-    mt = m.t()  # if complex: mt = m.t().conj()
-    return fact * m.matmul(mt).squeeze()
-
 
 def main():
     batch_size = 32
     latent_dim = 16
-    num_actions = datasource.NUM_ACTIONS
     train_iters = 10 * 1000
+
+    datasource = select_environment(args.env)
+    num_actions = datasource.NUM_ACTIONS
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
     discriminator = models.Discriminator()
     transition = models.Transition(latent_dim, num_actions)
-    #blur = models.GaussianSmoothing(channels=3, kernel_size=11, sigma=4.)
-    higgins_scores = []
 
     load_from_dir = '.'
     #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_a3ad2d0c'
@@ -159,49 +61,15 @@ def main():
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters)
     for train_iter in range(1, train_iters):
-        #theta = (train_iter / train_iters)
-        theta = 0.5
-        timesteps = 5 + int(5 * theta)
-        encoder.train()
-        decoder.train()
-        transition.train()
-        discriminator.train()
-        for model in (encoder, decoder, transition, discriminator):
-            for child in model.children():
-                if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
-                    child.momentum = 0.1
+        theta = (train_iter / train_iters)
+        timesteps = 2 + int(5 * theta)
 
-        """
-        # Train discriminator
-        states, rewards, dones, actions = datasource.get_trajectories(batch_size, 1)
-        states = torch.Tensor(states[:, 0]).cuda()
-        opt_disc.zero_grad()
-        real_scores = discriminator(states)
-        fake_scores = discriminator(decoder(encoder(states)))
-        real_loss = torch.mean(F.relu(1 - real_scores))
-        fake_loss = torch.mean(F.relu(1 + fake_scores))
-        ts.collect('D. real', real_loss)
-        ts.collect('D. fake', fake_loss)
-        disc_loss = real_loss + fake_loss
-        disc_loss.backward()
-        opt_disc.step()
-        """
+        test_mode([encoder, decoder, transition, discriminator])
 
         # Train encoder/transition/decoder
         opt_enc.zero_grad()
         opt_dec.zero_grad()
         opt_trans.zero_grad()
-
-        """
-        states, rewards, dones, actions = datasource.get_trajectories(batch_size, 1)
-        states = torch.Tensor(states[:, 0]).cuda()
-
-        # Train decoder using discriminator
-        fake_scores = discriminator(decoder(encoder(states).detach()))
-        gen_loss = .0001 * theta * torch.mean(F.relu(1 - fake_scores))
-        ts.collect('D. gen', gen_loss)
-        gen_loss.backward()
-        """
 
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
         states = torch.Tensor(states).cuda()
@@ -220,40 +88,17 @@ def main():
             if len(restart_indices) > 0:
                 z = z.clone()
                 z[restart_indices] = encoder(states[restart_indices, t])
-
             predicted = decoder(z)
 
-            # Log-Det independence loss
-            # Applies independently to each position in z
-            # TODO: sample a subset of z values uniformly from the batch
-            #z_samples = z.view(-1, latent_dim).permute(1, 0)[:, :1000].clone()
-            #covariance = cov(z_samples)
-            # The gradient of -log(det(X_ij)) is just X_ij
-            #log_det_penalty = theta * .1 * covariance.mean()
-            #ts.collect('Log-Det t={}'.format(t), log_det_penalty)
-            #loss += log_det_penalty
-
-            # L1 Sparsity loss
-            l1_penalty = theta * .001 * z.abs().mean()
-            ts.collect('L1 t={}'.format(t), l1_penalty)
-            loss += l1_penalty
+            # Reconstruction loss
             expected = states[:, t]
-
-            # MSE loss
             rec_loss = torch.mean((expected - predicted)**2)
-
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
 
-            # Predict the next latent point
+            # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
-            new_z = transition(z, onehot_a)
-
-            # Transition L1 sparsity loss
-            trans_l1_penalty = theta * .001 * (new_z - z).abs().mean()
-            ts.collect('T-L1 t={}'.format(t), trans_l1_penalty)
-            loss += trans_l1_penalty
-            z = new_z
+            z = transition(z, onehot_a)
 
         loss.backward()
 
@@ -262,24 +107,17 @@ def main():
         opt_trans.step()
         ts.print_every(2)
 
-        encoder.eval()
-        decoder.eval()
-        transition.eval()
-        discriminator.eval()
-        for model in (encoder, decoder, transition, discriminator):
-            for child in model.children():
-                if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
-                    child.momentum = 0
+        test_mode([encoder, decoder, transition, discriminator])
 
-        if train_iter % 100 == 0:
+        if train_iter % 500 == 0:
             vis = ((expected - predicted)**2)[:1]
             imutil.show(vis, filename='reconstruction_error.png')
 
-        if train_iter % 100 == 0:
+        if train_iter % 500 == 0:
             visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
 
         # Periodically save the network
-        if train_iter % 100 == 0:
+        if train_iter % 1000 == 0:
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
@@ -287,20 +125,30 @@ def main():
             torch.save(discriminator.state_dict(), 'model-discriminator.pth')
 
         # Periodically generate simulations of the future
-        if train_iter % 100 == 0:
+        if train_iter % 1000 == 0:
             visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter, num_actions=num_actions)
 
         if train_iter % 1000 == 0:
             compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions, iter=train_iter)
 
-        """
-        # Periodically generate latent space traversals
-        if train_iter % 1000 == 0:
-            visualize_latent_space(states, encoder, decoder, latent_dim=latent_dim, train_iter=train_iter)
-        """
-
     print(ts)
     print('Finished')
+
+
+def test_mode(networks):
+    for net in networks:
+        net.eval()
+        for child in net.children():
+            if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
+                child.momentum = 0
+
+
+def train_mode(networks):
+    for net in networks:
+        net.train()
+        for child in net.children():
+            if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
+                child.momentum = 0.1
 
 
 def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_actions, iter=0):
@@ -370,35 +218,6 @@ def visualize_reconstruction(encoder, decoder, states, train_iter=0):
     imutil.show(img, resize_to=(640, 360), img_padding=4,
                 filename='visual_reconstruction_{}.png'.format(tag),
                 caption=caption, font_size=10)
-
-
-def visualize_latent_space(states, encoder, decoder, latent_dim, train_iter=0, frames=120, img_size=800):
-    # Create a "batch" containing copies of the same image, one per latent dimension
-    ground_truth = states[:, 0]
-
-    for i in range(1, latent_dim):
-        ground_truth[i] = ground_truth[0]
-    zt = encoder(ground_truth)
-    zt.detach()
-    #minval, maxval = decoder.to_categorical.rho.min(), decoder.to_categorical.rho.max()
-    minval, maxval = -1, 1
-
-    # Generate L videos, one per latent dimension
-    vid = imutil.Video('latent_traversal_dims_{:04d}_iter_{:06d}'.format(latent_dim, train_iter))
-    for frame_idx in range(frames):
-        for z_idx in range(latent_dim):
-            z_val = (frame_idx / frames) * (maxval - minval) + minval
-            zt[z_idx, z_idx] = z_val
-        #output = torch.sigmoid(decoder(zt))
-        output = decoder(zt)[:latent_dim]
-        #reconstructed = torch.sigmoid(decoder(encoder(ground_truth)))
-        reconstructed = decoder(encoder(ground_truth))
-        video_frame = torch.cat([ground_truth[:1], reconstructed[:1], output], dim=0)
-        caption = '{}/{} z range [{:.02f} {:.02f}]'.format(frame_idx, frames, minval, maxval)
-        # Clip and scale
-        video_frame = 255 * torch.clamp(video_frame, 0, 1)
-        vid.write_frame(video_frame, resize_to=(img_size,img_size), caption=caption, img_padding=8, normalize=False)
-    vid.finish()
 
 
 def visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter=0, timesteps=60, num_actions=4):
