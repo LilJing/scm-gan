@@ -36,7 +36,7 @@ def select_environment(env_name):
 def main():
     batch_size = 32
     latent_dim = 16
-    train_iters = 10 * 1000
+    train_iters = 100 * 1000
 
     datasource = select_environment(args.env)
     num_actions = datasource.NUM_ACTIONS
@@ -45,8 +45,9 @@ def main():
     discriminator = models.Discriminator()
     transition = models.Transition(latent_dim, num_actions)
 
-    load_from_dir = '.'
+    #load_from_dir = '.'
     #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_a3ad2d0c'
+    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_a5e7d8a9'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -59,10 +60,10 @@ def main():
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
-    ts = TimeSeries('Training Model', train_iters)
+    ts = TimeSeries('Training Model', train_iters, tensorboard=True)
     for train_iter in range(1, train_iters):
         theta = (train_iter / train_iters)
-        timesteps = 2 + int(5 * theta)
+        timesteps = 3 + int(5 * theta)
 
         test_mode([encoder, decoder, transition, discriminator])
 
@@ -88,10 +89,10 @@ def main():
             if len(restart_indices) > 0:
                 z = z.clone()
                 z[restart_indices] = encoder(states[restart_indices, t])
-            predicted = decoder(z)
 
             # Reconstruction loss
             expected = states[:, t]
+            predicted = decoder(z)
             rec_loss = torch.mean((expected - predicted)**2)
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
@@ -99,28 +100,26 @@ def main():
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
 
-            predicted_z_from_zero.append(z)
             z = transition(z, onehot_a)
+            predicted_z_from_zero.append(z)
 
-        predicted_z_from_one = []
-        for t in range(1, timesteps):
+        z = encoder(states[:, 2])
+        for t in range(2, timesteps):
             # For episodes that begin at this frame, re-encode z
             restart_indices = dones[:, t].nonzero()[:, 0]
             if len(restart_indices) > 0:
                 z = z.clone()
                 z[restart_indices] = encoder(states[restart_indices, t])
-            predicted = decoder(z)
 
             # Temporal Difference loss
             expected = z
-            predicted = predicted_z_from_zero[t-1]
+            predicted = predicted_z_from_zero[t-1].detach()
             td_loss = torch.mean((expected - predicted)**2)
             ts.collect('TD 2:1 t={}'.format(t), td_loss)
-            loss += td_loss
+            loss += theta * td_loss
 
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
-            predicted_z_from_one.append(z)
             z = transition(z, onehot_a)
 
         loss.backward()
