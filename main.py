@@ -65,7 +65,7 @@ def main():
         theta = (train_iter / train_iters)
         timesteps = 3 + int(5 * theta)
 
-        test_mode([encoder, decoder, transition, discriminator])
+        train_mode([encoder, decoder, transition, discriminator])
 
         # Train encoder/transition/decoder
         opt_enc.zero_grad()
