@@ -54,11 +54,13 @@ class RealpongEnv():
         # Ball bouncing from the paddles
         bounce_right = GAME_SIZE - MARGIN_X - BALL_RADIUS - PADDLE_WIDTH
         bounce_left = MARGIN_X + BALL_RADIUS + PADDLE_WIDTH
-        if (self.ball_x == bounce_right and self.ball_velocity_x > 0 and
-            self.right_y - PADDLE_HEIGHT <= self.ball_y <= self.right_y + PADDLE_HEIGHT):
+        if (bounce_right <= self.ball_x <= bounce_right + BALL_RADIUS
+            and self.ball_velocity_x > 0
+            and self.right_y - PADDLE_HEIGHT <= self.ball_y <= self.right_y + PADDLE_HEIGHT):
             self.ball_velocity_x *= -1
-        if (self.ball_x == bounce_left and self.ball_velocity_x < 0 and
-            self.left_y - PADDLE_HEIGHT <= self.ball_y <= self.left_y + PADDLE_HEIGHT):
+        if (bounce_left - BALL_RADIUS <= self.ball_x <= bounce_left
+            and self.ball_velocity_x < 0
+            and self.left_y - PADDLE_HEIGHT <= self.ball_y <= self.left_y + PADDLE_HEIGHT):
             self.ball_velocity_x *= -1
 
         # Ball bounces off the top and bottom
