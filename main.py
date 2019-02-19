@@ -93,7 +93,7 @@ def main():
 
         loss = 0
         # Predict forward in time from t=2
-        for t in range(2, timesteps):
+        for t in range(3, timesteps):
             active_mask = active_mask * (1 - dones[:, t])
 
             # Reconstruction loss
@@ -266,7 +266,7 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
     vid_separable_conv = imutil.Video('simulation_separable_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:1, 0:3])
     z.detach()
-    for t in range(timesteps - 1):
+    for t in range(3, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
 
         # Render top row: real video vs. simulation from initial conditions
