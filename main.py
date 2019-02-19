@@ -79,38 +79,49 @@ def main():
 
         # Encode the initial state (using the first 3 frames)
         z = encoder(states[:, 0:3])
+        z0 = z.clone()
         if train_iter % 100 == 0:
             demo_z = encoder(demo_states[:1, :3])[0]
-            imutil.show(demo_states[0, 2], save=False)
-            imutil.show(demo_z, save=False)
+            imutil.show(demo_z, video_filename='latent_space_training.mjpeg')
+
+        # Keep track of "done" states to stop predicting a trajectory
+        #  once it reaches the end of the game
+        active_mask = torch.ones(batch_size).cuda()
 
         loss = 0
         # Predict forward in time from t=2
-        restart_indices = []
         for t in range(2, timesteps):
-            # TODO: Mask out frames that pass the end of the game
-            done_mask = torch.ones(batch_size).cuda()
+            active_mask = active_mask * (1 - dones[:, t])
 
             # Reconstruction loss
             expected = states[:, t]
             predicted = decoder(z)
-            rec_loss = torch.mean((expected - predicted)**2)
+            mse_difference = ((expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
+            rec_loss = torch.mean(mse_difference * active_mask)
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
 
-            l1_loss = torch.mean(z.abs())
+            l1_values = z.abs().mean(-1).mean(-1).mean(-1)
+            l1_loss = torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
             loss += .01 * theta * l1_loss
 
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
-
             new_z = transition(z, onehot_a)
-            t_l1_loss = torch.mean((new_z - z).abs())
+            t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
+            t_l1_loss = torch.mean(t_l1_values * active_mask)
             ts.collect('T-L1 t={}'.format(t), t_l1_loss)
             loss += .01 * theta * t_l1_loss
             z = new_z
 
+        # Add an extra consistency loss
+        onehot_a = torch.eye(num_actions)[actions[:, 2]].cuda()
+        t_e_prediction = transition(z0, onehot_a)
+        e_prediction = encoder(states[:, 1:4])
+        consistency_loss = torch.mean((t_e_prediction - e_prediction)**2)
+        ts.collect('C t=1', consistency_loss)
+        loss += consistency_loss
         loss.backward()
 
         opt_enc.step()
