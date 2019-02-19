@@ -9,7 +9,7 @@ from gym.spaces.discrete import Discrete
 CHANNELS = 3
 GAME_SIZE = 64
 PADDLE_WIDTH = 1
-PADDLE_HEIGHT = 7
+PADDLE_HEIGHT = 4
 BALL_RADIUS = 2
 NUM_ACTIONS = 4
 
@@ -54,11 +54,11 @@ class RealpongEnv():
         # Ball bouncing from the paddles
         bounce_right = GAME_SIZE - MARGIN_X - BALL_RADIUS - PADDLE_WIDTH
         bounce_left = MARGIN_X + BALL_RADIUS + PADDLE_WIDTH
-        if (bounce_right <= self.ball_x <= bounce_right + BALL_RADIUS
+        if (self.ball_x <= bounce_right + BALL_RADIUS
             and self.ball_velocity_x > 0
             and self.right_y - PADDLE_HEIGHT <= self.ball_y <= self.right_y + PADDLE_HEIGHT):
             self.ball_velocity_x *= -1
-        if (bounce_left - BALL_RADIUS <= self.ball_x <= bounce_left
+        if (bounce_left - BALL_RADIUS <= self.ball_x
             and self.ball_velocity_x < 0
             and self.left_y - PADDLE_HEIGHT <= self.ball_y <= self.left_y + PADDLE_HEIGHT):
             self.ball_velocity_x *= -1
