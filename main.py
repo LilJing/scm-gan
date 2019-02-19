@@ -92,7 +92,7 @@ def main():
         blur = models.GaussianSmoothing(channels=latent_dim, kernel_size=3, sigma=1)
 
         loss = 0
-        # Predict forward in time from t=2
+        # Predict forward in time from t=3
         for t in range(3, timesteps):
             active_mask = active_mask * (1 - dones[:, t])
 
@@ -131,12 +131,12 @@ def main():
             z = new_z
 
         # Add an extra consistency loss
-        #onehot_a = torch.eye(num_actions)[actions[:, 2]].cuda()
-        #t_e_prediction = transition(z0, onehot_a)
-        #e_prediction = encoder(states[:, 1:4])
-        #consistency_loss = torch.mean((t_e_prediction - e_prediction)**2)
-        #ts.collect('C t=1', consistency_loss)
-        #loss += consistency_loss
+        onehot_a = torch.eye(num_actions)[actions[:, 2]].cuda()
+        t_e_prediction = transition(z0, onehot_a)
+        e_prediction = encoder(states[:, 1:4])
+        consistency_loss = torch.mean((t_e_prediction - e_prediction)**2)
+        ts.collect('C t=1', consistency_loss)
+        loss += consistency_loss
 
         loss.backward()
 
