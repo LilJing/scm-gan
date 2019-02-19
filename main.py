@@ -37,7 +37,7 @@ def select_environment(env_name):
 def main():
     batch_size = 32
     latent_dim = 16
-    train_iters = 100 * 1000
+    train_iters = 10 * 1000
 
     datasource = select_environment(args.env)
     num_actions = datasource.NUM_ACTIONS

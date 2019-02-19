@@ -121,6 +121,10 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
 
 
 def convert_atari_frame(state, width=64, height=64):
+    if ENV_NAME.startswith('SpaceInvaders'):
+        # Crop to playable area
+        state = state[20:]
+
     state = imutil.get_pixels(state, width, height)
     state = state.transpose((2,0,1))
     return state
