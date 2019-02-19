@@ -17,6 +17,7 @@ from logutil import TimeSeries
 
 import models
 from causal_graph import render_causal_graph
+from utils import cov
 
 
 parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
@@ -105,6 +106,18 @@ def main():
             l1_loss = torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
             loss += .01 * theta * l1_loss
+
+            # Log-Det independence loss
+            # Sample 1000 random latent vector spatial points from the batch
+            latent_vectors = z.permute(0, 2, 3, 1).contiguous().view(-1, latent_dim)
+            rand_indices = np.random.randint(0, len(latent_vectors), size=(1000,))
+            z_samples = latent_vectors[rand_indices]
+            # Compute log determinant of the covariance matrix of latent dimensions
+            covariance = cov(z_samples)
+            # The gradient of -log(det(X_ij)) is just X_ij
+            log_det_penalty = theta * .1 * covariance.mean()
+            ts.collect('Log-Det t={}'.format(t), log_det_penalty)
+            loss += log_det_penalty
 
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
