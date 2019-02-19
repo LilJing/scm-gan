@@ -15,7 +15,8 @@ from spatial_recurrent import CSRN
 from coordconv import CoordConv2d
 
 IMG_SIZE = 64
-INPUT_CHANNELS = 3
+INPUT_FRAMES = 3
+INPUT_CHANNELS = 3 * INPUT_FRAMES
 
 
 class Transition(nn.Module):
@@ -64,18 +65,20 @@ class Encoder(nn.Module):
         super().__init__()
         self.latent_size = latent_size
         # Bx1x64x64
-        self.conv1 = nn.Conv2d(INPUT_CHANNELS, 32, (5,5), stride=1, padding=2)
+        self.conv1 = nn.Conv2d(INPUT_CHANNELS, 64, (5,5), stride=1, padding=2)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.Conv2d(32, 32, (5,5), stride=2, padding=2)
-        self.conv3 = nn.Conv2d(32, latent_size, (5,5), stride=2, padding=2)
+        self.conv2 = nn.Conv2d(64, 64, (3,3), stride=1, padding=1)
+        self.conv3 = nn.Conv2d(64, 64, (5,5), stride=2, padding=2)
+        self.conv4 = nn.Conv2d(64, latent_size, (5,5), stride=1, padding=2)
 
         # Bxlatent_size
         self.cuda()
 
     def forward(self, x):
         # Input: B x 1 x 64 x 64
-        batch_size, channels, height, width = x.shape
+        batch_size, frames, channels, height, width = x.shape
+        x = x.view(batch_size, frames*channels, height, width)
 
         x = self.conv1(x)
         x = F.leaky_relu(x)
@@ -84,6 +87,9 @@ class Encoder(nn.Module):
         x = F.leaky_relu(x)
 
         x = self.conv3(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv4(x)
         x = torch.sigmoid(x)
         return x
 
@@ -125,10 +131,12 @@ class Decoder(nn.Module):
         self.latent_size = latent_size
 
         # Bx1x64x64
-        self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (4,4), stride=2, padding=1, groups=latent_size, bias=False)
+        self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (4,4),
+                        stride=2, padding=1, groups=latent_size, bias=False)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*3, (4,4), stride=2, padding=1, groups=latent_size, bias=False)
+        self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*3, (3,3),
+                        stride=1, padding=1, groups=latent_size, bias=False)
         self.bg = nn.Parameter(torch.zeros((3, IMG_SIZE, IMG_SIZE)).cuda())
         self.cuda()
 

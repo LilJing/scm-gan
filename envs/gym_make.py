@@ -120,7 +120,7 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
     return np.array(states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
 
 
-def convert_atari_frame(state, width=128, height=128):
+def convert_atari_frame(state, width=64, height=64):
     state = imutil.get_pixels(state, width, height)
     state = state.transpose((2,0,1))
     return state
