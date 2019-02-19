@@ -131,12 +131,12 @@ def main():
             z = new_z
 
         # Add an extra consistency loss
-        onehot_a = torch.eye(num_actions)[actions[:, 2]].cuda()
-        t_e_prediction = transition(z0, onehot_a)
-        e_prediction = encoder(states[:, 1:4])
-        consistency_loss = torch.mean((t_e_prediction - e_prediction)**2)
-        ts.collect('C t=1', consistency_loss)
-        loss += consistency_loss
+        #onehot_a = torch.eye(num_actions)[actions[:, 2]].cuda()
+        #t_e_prediction = transition(z0, onehot_a)
+        #e_prediction = encoder(states[:, 1:4])
+        #consistency_loss = torch.mean((t_e_prediction - e_prediction)**2)
+        #ts.collect('C t=1', consistency_loss)
+        #loss += consistency_loss
 
         loss.backward()
 
