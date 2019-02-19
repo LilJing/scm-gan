@@ -111,17 +111,17 @@ def main():
 
             # Spatially-Coherent Log-Determinant independence loss
             # Sample 1000 random latent vector spatial points from the batch
-            #latent_vectors = blur(z).permute(0, 2, 3, 1).contiguous().view(-1, latent_dim)
-            #rand_indices = np.random.randint(0, len(latent_vectors), size=(1000,))
-            #z_samples = latent_vectors[rand_indices]
+            latent_vectors = blur(z).permute(0, 2, 3, 1).contiguous().view(-1, latent_dim)
+            rand_indices = np.random.randint(0, len(latent_vectors), size=(1000,))
+            z_samples = latent_vectors[rand_indices]
             # Compute log det cov of latent channels
-            #covariance = cov(z_samples)
+            covariance = cov(z_samples)
             # The gradient of -log(det(X_ij)) is just X_ij
-            #eps = 1e-5
-            #log_det = -torch.log(torch.det(covariance / covariance.max()) + eps)
-            #log_det_penalty = theta * .01 * log_det
-            #ts.collect('Log-Det t={}'.format(t), log_det_penalty)
-            #loss += log_det_penalty
+            eps = 1e-5
+            log_det = -torch.log(torch.det(covariance / covariance.max()) + eps)
+            log_det_penalty = theta * .01 * log_det
+            ts.collect('Log-Det t={}'.format(t), log_det_penalty)
+            loss += log_det_penalty
 
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
