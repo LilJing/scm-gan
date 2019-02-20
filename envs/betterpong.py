@@ -12,6 +12,7 @@ PADDLE_WIDTH = 1
 PADDLE_HEIGHT = 8
 BALL_RADIUS = 2
 NUM_ACTIONS = 4
+TRUE_LATENT_DIM = 6
 
 MARGIN_Y = 4
 MARGIN_X = 5
@@ -127,6 +128,45 @@ def get_trajectories(batch_size=32, timesteps=10, policy='random', random_start=
     dones = np.swapaxes(t_dones, 0, 1)
     actions = np.swapaxes(t_actions, 0, 1)
     return states, rewards, dones, actions
+
+
+def simulator(factor_batch):
+    batch_size = len(factor_batch)
+    images = []
+    for i in range(batch_size):
+        images.append(generate_state_from_factors(factor_batch[i]))
+    return np.array(images)
+
+
+def generate_state_from_factors(z):
+    # Each dimension of z represents an independent factor
+    # Each factor is assumed to range from [0, 1] uniform
+    left_y = rescale(z[0], 0, GAME_SIZE)
+    right_y = rescale(z[1], 0, GAME_SIZE)
+    ball_x = rescale(z[2], MARGIN_X, GAME_SIZE - MARGIN_X)
+    ball_y = rescale(z[3], MARGIN_Y, GAME_SIZE - MARGIN_Y)
+    vel_x = rescale(z[4], -3, +3)
+    vel_y = rescale(z[5], -3, +3)
+
+    frames = []
+    env = BetterPongEnv()
+    env.left_y = left_y
+    env.right_y = right_y
+    env.ball_x = ball_x
+    env.ball_y = ball_y
+    env.ball_velocity_x = left_y
+    env.ball_velocity_y = left_y
+
+    for i in range(3):
+        frames.append(render_state(env.left_y, env.right_y, env.ball_x,
+                                   env.ball_y, env.ball_velocity_x, env.ball_velocity_y))
+        action = np.random.randint(NUM_ACTIONS)
+        env.step(action)
+    return np.array(frames)
+
+
+def rescale(z_i, min_val, max_val):
+    return int((z_i * (max_val - min_val)) + min_val + 0.5)
 
 
 if __name__ == '__main__':

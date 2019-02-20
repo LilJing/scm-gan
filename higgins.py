@@ -86,3 +86,71 @@ def higgins_metric(simulator, true_latent_dim, encoder, encoded_latent_dim,
 
     return num_correct / batch_size
 
+
+def higgins_metric_conv(simulator, true_latent_dim, encoder, encoded_latent_dim,
+                   batch_size=32, train_iters=100):
+    # Train a linear classifier using uniform randomly-generated pairs of images,
+    # where the pair shares one generative factor in common.
+    # Given the learned encodings of a pair, predict which factor is the same.
+    linear_model = LinearClassifier(encoded_latent_dim, true_latent_dim)
+    optimizer = torch.optim.Adam(linear_model.parameters())
+    ts = TimeSeries('Computing Higgins Metric', train_iters)
+
+    for train_iter in range(train_iters):
+        def generate_equivariance_test_batch(y_labels):
+            # Generate batch_size pairs
+            random_factors = np.random.uniform(size=(batch_size, 2, true_latent_dim))
+
+            # Each pair of images has one factor in common
+            for i in range(batch_size):
+                y_idx = y_labels[i]
+                random_factors[i][0][y_idx] = random_factors[i][1][y_idx]
+
+            # For each pair, generate images with the simulator and encode the images
+            images_left = simulator(random_factors[:,0,:])
+            images_right = simulator(random_factors[:,1,:])
+
+            # Now encode each pair and take their difference
+            x_left = torch.FloatTensor(images_left).cuda()
+            if len(x_left.shape) < 4:
+                x_left = x_left.unsqueeze(1)
+            x_right = torch.FloatTensor(images_right).cuda()
+            if len(x_right.shape) < 4:
+                x_right = x_right.unsqueeze(1)
+            encoded_left = encoder(x_left)[0]
+            encoded_right = encoder(x_right)[0]
+            z_diff = torch.abs(encoded_left - encoded_right).sum(dim=-1).sum(dim=-1)
+            return z_diff.data.cpu().numpy()
+
+        # For each pair, select a factor to set
+        y_labels = np.random.randint(0, true_latent_dim, size=batch_size)
+        L = 5
+        z_diffs = np.zeros((L, batch_size, encoded_latent_dim))
+        for l in range(L):
+            z_diffs[l] = generate_equivariance_test_batch(y_labels)
+        z_diff = np.mean(z_diffs, axis=0)
+        z_diff = torch.FloatTensor(z_diff).cuda()
+
+        # Now given z_diff, predict y_labels
+        optimizer.zero_grad()
+        target = torch.LongTensor(y_labels).cuda()
+        logits = linear_model(z_diff)
+        y_pred = torch.softmax(logits, dim=1).max(1, keepdim=True)[1]
+        num_correct = y_pred.eq(target.view_as(y_pred)).sum().item()
+
+        loss = nn.functional.nll_loss(torch.log_softmax(logits, dim=1), target)
+        loss.backward()
+        optimizer.step()
+
+        # Track the training accuracy over time
+        ts.collect('NLL Loss', loss)
+        ts.collect('Train accuracy', num_correct / batch_size)
+        ts.print_every(2)
+        # Print accuracy for an extra big test batch at the end
+        if train_iter == train_iters - 2:
+            batch_size = 1000
+    print(ts)
+    print('Test Accuracy: {}'.format(num_correct / batch_size))
+
+    return num_correct / batch_size
+

@@ -17,6 +17,7 @@ from logutil import TimeSeries
 
 import models
 from causal_graph import render_causal_graph
+from higgins import higgins_metric_conv
 from utils import cov
 
 
@@ -63,7 +64,7 @@ def main():
     demo_states, _, _, _ = datasource.get_trajectories(batch_size, 10)
     demo_states = torch.Tensor(demo_states).cuda()
 
-    for train_iter in range(1, train_iters):
+    for train_iter in range(0, train_iters):
         theta = (train_iter / train_iters)
         timesteps = 5 + int(10 * theta)
 
@@ -107,7 +108,7 @@ def main():
             l1_values = z.abs().mean(-1).mean(-1).mean(-1)
             l1_loss = torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
-            loss += .01 * theta * l1_loss
+            loss += .001 * theta * l1_loss
 
             # Spatially-Coherent Log-Determinant independence loss
             # Sample 1000 random latent vector spatial points from the batch
@@ -127,7 +128,7 @@ def main():
             t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
             t_l1_loss = torch.mean(t_l1_values * active_mask)
             ts.collect('T-L1 t={}'.format(t), t_l1_loss)
-            loss += .01 * theta * t_l1_loss
+            loss += .001 * theta * t_l1_loss
             z = new_z
 
         # Add an extra consistency loss
@@ -136,7 +137,7 @@ def main():
         e_prediction = encoder(states[:, 1:4])
         consistency_loss = torch.mean((t_e_prediction - e_prediction)**2)
         ts.collect('C t=1', consistency_loss)
-        loss += consistency_loss
+        loss += .1 * theta * consistency_loss
 
         loss.backward()
 
@@ -147,12 +148,18 @@ def main():
 
         test_mode([encoder, decoder, transition, discriminator])
 
+        # Periodically generate visualizations
         if train_iter % 500 == 0:
             vis = ((expected - predicted)**2)[:1]
             imutil.show(vis, filename='reconstruction_error.png')
 
         if train_iter % 500 == 0:
             visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
+
+        # Periodically compute expensive metrics
+        if train_iter % 1000 == 0:
+            disentanglement_score = higgins_metric_conv(datasource.simulator,
+               datasource.TRUE_LATENT_DIM, encoder, latent_dim)
 
         # Periodically save the network
         if train_iter % 1000 == 0:
