@@ -88,7 +88,7 @@ def higgins_metric(simulator, true_latent_dim, encoder, encoded_latent_dim,
 
 
 def higgins_metric_conv(simulator, true_latent_dim, encoder, encoded_latent_dim,
-                   batch_size=32, train_iters=100):
+                   batch_size=16, train_iters=500):
     # Train a linear classifier using uniform randomly-generated pairs of images,
     # where the pair shares one generative factor in common.
     # Given the learned encodings of a pair, predict which factor is the same.
