@@ -38,7 +38,7 @@ def select_environment(env_name):
 def main():
     batch_size = 32
     latent_dim = 16
-    train_iters = 10 * 1000
+    train_iters = 100 * 1000
 
     datasource = select_environment(args.env)
     num_actions = datasource.NUM_ACTIONS
@@ -48,6 +48,7 @@ def main():
     transition = models.Transition(latent_dim, num_actions)
 
     load_from_dir = '.'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_d331a2da'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -66,7 +67,7 @@ def main():
 
     for train_iter in range(0, train_iters):
         theta = (train_iter / train_iters)
-        timesteps = 5 + int(10 * theta)
+        timesteps = 10 + int(10 * theta)
 
         train_mode([encoder, decoder, transition, discriminator])
 
@@ -157,9 +158,11 @@ def main():
             visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
 
         # Periodically compute expensive metrics
+        """
         if train_iter % 1000 == 0:
             disentanglement_score = higgins_metric_conv(datasource.simulator,
                datasource.TRUE_LATENT_DIM, encoder, latent_dim)
+        """
 
         # Periodically save the network
         if train_iter % 1000 == 0:
@@ -266,7 +269,7 @@ def visualize_reconstruction(encoder, decoder, states, train_iter=0):
 def visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter=0, timesteps=60, num_actions=4):
     start_time = time.time()
     print('Starting trajectory simulation for {} frames'.format(timesteps))
-    states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps, random_start=False)
+    states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps)
     states = torch.Tensor(states).cuda()
     vid_simulation = imutil.Video('simulation_only_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     vid_features = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
