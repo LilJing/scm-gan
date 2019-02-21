@@ -21,7 +21,7 @@ class MultiEnvironment():
         #print('Initialized {} environments in {:.03f}s'.format(self.batch_size, time.time() - start_time))
 
     def reset(self):
-        map_fn(lambda env: env.reset(), self.envs)
+        return map_fn(lambda env: env.reset(), self.envs)
 
     def step(self, actions):
         start_time = time.time()
