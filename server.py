@@ -1,34 +1,31 @@
 import flask
 import imutil
-import gym
 import numpy as np
+import atari_py
 
 app = flask.Flask(__name__)
 
-class GameEnv(gym.Env):
+class GameEnv():
     def __init__(self, name):
-        super().__init__()
-        self.env = gym.make(name)
-        self.env.unwrapped.frameskip = 1
-        self.last_state = self.env.reset()
-
-    def step(self, action):
-        new_state, reward, done, info = self.env.step(action)
-
-        # Max the previous two frames to remove flickering
-        state = np.maximum(new_state, self.last_state)
-
-        self.last_state = new_state
-        return state, reward, done, info
+        path = atari_py.get_game_path(name)
+        self.ale = atari_py.ALEInterface()
+        self.ale.loadROM(path)
 
     def reset(self):
-        return self.env.reset()
+        self.ale.reset_game()
+        return self.ale.getScreenRGB2()
 
+    def step(self, action):
+        reward = self.ale.act(action)
+        state = self.ale.getScreenRGB2()
+        done = self.ale.game_over()
+        info = {'ale.lives': self.ale.lives()}
+        return state, reward, done, info
 
 
 def reset_game():
     global env
-    env = GameEnv('CentipedeDeterministic-v4')
+    env = GameEnv('centipede')
     state = env.reset()
     imutil.show(state, filename='static/screenshot.jpg')
 
@@ -42,7 +39,7 @@ def route_step():
     print('action from form is: {}'.format(action))
     state, reward, done, info = env.step(action)
     imutil.show(state, filename='static/screenshot.jpg')
-    frame_num = env.env.unwrapped.ale.getFrameNumber()
+    frame_num = env.ale.getFrameNumber()
     print('took action, now at frame num {}'.format(frame_num))
     if done:
         env.reset()
