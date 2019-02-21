@@ -59,5 +59,41 @@ function postData(url = ``, data = {}) {
     });
     //.then(response => response.json()); // parses response to JSON
 }
+
+document.addEventListener('keydown', function(event) {
+    if (event.keyCode == 37) {
+        console.log('Left was pressed');
+    } else if (event.keyCode == 39) {
+        console.log('Right was pressed');
+    } else if (event.keyCode == 49) {
+        console.log('1 was pressed');
+    } else if (event.keyCode == 50) {
+        console.log('2 was pressed');
+    } else if (event.keyCode == 51) {
+        console.log('3 was pressed');
+    } else if (event.keyCode == 52) {
+        console.log('4 was pressed');
+    } else if (event.keyCode == 53) {
+        console.log('5 was pressed');
+    } else if (event.keyCode == 54) {
+        console.log('6 was pressed');
+    } else if (event.keyCode == 55) {
+        console.log('7 was pressed');
+    } else if (event.keyCode == 56) {
+        console.log('8 was pressed');
+    } else if (event.keyCode == 56) {
+        console.log('9 was pressed');
+    }
+
+    if (49 <= event.keyCode && event.keyCode <= 58) {
+        var action_idx = event.keyCode - 49;
+        console.log('Sending action ' + event.keyCode);
+        postData(`/step`, {action: action_idx}).then(function(response) {
+            console.log('response ' + response.text());
+            load_screenshot();
+        }).catch(error => console.error(error));
+    }
+});
+
 </script>
 </html>
