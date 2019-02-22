@@ -125,6 +125,20 @@ class Discriminator(nn.Module):
         return x.sum(dim=-1).sum(dim=-1).sum(dim=-1)
 
 
+class RewardPredictor(nn.Module):
+    def __init__(self, latent_dim):
+        super().__init__()
+        self.conv1 = nn.Conv2d(latent_dim, 32, (3,3), stride=1, padding=0)
+        self.conv2 = nn.Conv2d(32, 1, (3,3), stride=1, padding=0)
+        self.cuda()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
+        return x.mean(-1).mean(-1).sum(-1)
+
+
 class Decoder(nn.Module):
     def __init__(self, latent_size):
         super().__init__()

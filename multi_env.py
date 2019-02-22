@@ -25,7 +25,7 @@ class MultiEnvironment():
 
     def step(self, actions):
         start_time = time.time()
-        assert len(actions) == len(self.envs)
+        #assert len(actions) == len(self.envs)
 
         def run_one_step(env, action):
             state, reward, done, info = env.step(action)

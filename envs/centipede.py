@@ -60,7 +60,7 @@ class HeuristicPolicy():
 envs = None
 def get_trajectories(batch_size=32, timesteps=10, policy=None, random_start=False):
     global envs
-    if envs is None or batch_size != envs.batch_size:
+    if envs is None:
         envs = MultiEnvironment([GameEnv() for _ in range(batch_size)])
     actions = np.random.randint(envs.action_space.n, size=(batch_size,))
 
@@ -71,6 +71,7 @@ def get_trajectories(batch_size=32, timesteps=10, policy=None, random_start=Fals
     t_states, t_rewards, t_dones, t_actions = [], [], [], []
     for t in range(timesteps):
         actions = [p.step(s) for p, s in zip(policies, states)]
+        actions = actions[:batch_size]  # hack for fixed envs w/ varible batch size
         states, rewards, dones, _ = envs.step(actions)
         t_states.append(states)
         t_rewards.append(rewards)

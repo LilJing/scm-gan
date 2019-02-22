@@ -19,6 +19,7 @@ import models
 from causal_graph import render_causal_graph
 from higgins import higgins_metric_conv
 from utils import cov
+from tqdm import tqdm
 
 
 parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
@@ -44,23 +45,26 @@ def main():
     num_actions = datasource.NUM_ACTIONS
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
+    reward_predictor = models.RewardPredictor(latent_dim)
     discriminator = models.Discriminator()
     transition = models.Transition(latent_dim, num_actions)
 
-    load_from_dir = '.'
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_d331a2da'
+    #load_from_dir = '.'
+    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_34bddf9c'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
         decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-decoder.pth')))
         transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
         discriminator.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-discriminator.pth')))
+        #reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward-pred.pth')))
 
     # Train the autoencoder
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
+    opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.0005)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
     demo_states, _, _, _ = datasource.get_trajectories(batch_size, 10)
     demo_states = torch.Tensor(demo_states).cuda()
@@ -75,9 +79,11 @@ def main():
         opt_enc.zero_grad()
         opt_dec.zero_grad()
         opt_trans.zero_grad()
+        opt_pred.zero_grad()
 
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
         states = torch.Tensor(states).cuda()
+        rewards = torch.Tensor(rewards).cuda()
         dones = torch.Tensor(dones.astype(int)).cuda()
 
         # Encode the initial state (using the first 3 frames)
@@ -123,6 +129,13 @@ def main():
             #ts.collect('Log-Det t={}'.format(t), log_det_penalty)
             #loss += log_det_penalty
 
+            # Predict reward
+            expected_reward = reward_predictor(z)
+            actual_reward = rewards[:, t]
+            reward_difference = torch.sum((expected_reward - actual_reward)**2 * active_mask)
+            ts.collect('Rd Loss t={}'.format(t), reward_difference)
+            loss += .01 * reward_difference
+
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
@@ -145,17 +158,18 @@ def main():
         opt_enc.step()
         opt_dec.step()
         opt_trans.step()
+        opt_pred.step()
         ts.print_every(2)
 
         test_mode([encoder, decoder, transition, discriminator])
 
         # Periodically generate visualizations
-        if train_iter % 500 == 0:
+        if train_iter % 1000 == 0:
             vis = ((expected - predicted)**2)[:1]
             imutil.show(vis, filename='reconstruction_error.png')
 
-        if train_iter % 500 == 0:
-            visualize_reconstruction(encoder, decoder, states, train_iter=train_iter)
+        if train_iter % 1000 == 0:
+            visualize_reconstruction(datasource, encoder, decoder, transition, train_iter=train_iter)
 
         # Periodically compute expensive metrics
         """
@@ -171,10 +185,11 @@ def main():
             torch.save(encoder.state_dict(), 'model-encoder.pth')
             torch.save(decoder.state_dict(), 'model-decoder.pth')
             torch.save(discriminator.state_dict(), 'model-discriminator.pth')
+            torch.save(reward_predictor.state_dict(), 'model-reward-pred.pth')
 
         # Periodically generate simulations of the future
         if train_iter % 1000 == 0:
-            visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter, num_actions=num_actions)
+            visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
 
         if train_iter % 1000 == 0:
             compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions, iter=train_iter)
@@ -253,20 +268,39 @@ def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_a
     imutil.show(graph_img, filename='causal_graph_iter_{:06d}.png'.format(iter))
 
 
-def visualize_reconstruction(encoder, decoder, states, train_iter=0):
+def visualize_reconstruction(datasource, encoder, decoder, transition, train_iter=0):
     # Image of reconstruction
+    num_actions = 6
     filename = 'vis_iter_{:06d}.png'.format(train_iter)
-    ground_truth = states[:, 0:3]
-    tag = 'iter_{:06d}'.format(train_iter)
-    reconstructed = decoder(encoder(ground_truth))
-    img = torch.cat((ground_truth[:4, 2], reconstructed[:4]), dim=3)
-    caption = 'D(E(x)) iter {}'.format(train_iter)
-    imutil.show(img, resize_to=(640, 360), img_padding=4,
-                filename='visual_reconstruction_{}.png'.format(tag),
-                caption=caption, font_size=10)
+    timesteps = 60
+    batch_size = 1
+    states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
+    states = torch.Tensor(states).cuda()
+    rewards = torch.Tensor(rewards).cuda()
+    actions = torch.LongTensor(actions).cuda()
+    for offset in [0, 1, 2, 3, 5, 10]:
+        print('Generating video for offset {}'.format(offset))
+        vid = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter))
+        for t in tqdm(range(3, timesteps - 10)):
+            #print('encoding frame {}'.format(t))
+            z = encoder(states[:, t-3:t])
+            for i in range(offset):
+                onehot_a = torch.eye(num_actions)[actions[:, t + i]].cuda()
+                #print('\t...predicting frame {}'.format(t + i + 1))
+                z = transition(z, onehot_a)
+            predicted = decoder(z)
+            actual = states[:, t + offset]
+            left = imutil.get_pixels(actual[0], normalize=False)
+            right = imutil.get_pixels(predicted[0], normalize=False)
+            pixels = np.concatenate([left, right], axis=1)
+            pixels = np.clip(pixels, 0, 1)
+            caption = "Left: True t={} Right: Predicted from t-{}".format(t, offset)
+            vid.write_frame(pixels * 255, normalize=False, img_padding=8, resize_to=(800, 400), caption=caption)
+        vid.finish()
+    print('Finished generating forward-prediction videos')
 
 
-def visualize_forward_simulation(datasource, encoder, decoder, transition, train_iter=0, timesteps=60, num_actions=4):
+def visualize_forward_simulation(datasource, encoder, decoder, transition, reward_pred, train_iter=0, timesteps=60, num_actions=4):
     start_time = time.time()
     print('Starting trajectory simulation for {} frames'.format(timesteps))
     states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps)
@@ -278,10 +312,12 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, train
     z.detach()
     for t in range(3, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
+        estimated_reward = reward_pred(z)
 
         # Render top row: real video vs. simulation from initial conditions
         pixel_view = torch.cat((states[:, t][:1], x_t[:1]), dim=3)
-        caption = 'Pred. t+{} a={} min={:.2f} max={:.2f}'.format(t, actions[:1, t], pixel_view.min(), pixel_view.max())
+        caption = 'Pred. t+{} a={} R est={:.2f} R={} min={:.2f} max={:.2f}'.format(
+            t, actions[:1, t], estimated_reward[0], rewards[:1, t], pixel_view.min(), pixel_view.max())
         top_row = imutil.show(pixel_view.clamp_(0,1), caption=caption, img_padding=8, font_size=10, resize_to=(800,400), return_pixels=True, display=False, save=False)
         caption = 'Left: Real          Right: Simulated from initial conditions t={}'.format(t)
         vid_simulation.write_frame(pixel_view.clamp(0, 1), caption=caption, resize_to=(1280,640))
