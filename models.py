@@ -55,7 +55,7 @@ class Transition(nn.Module):
         x = self.conv5(x)
         x = F.leaky_relu(x)
         x = self.conv6(x)
-        x = torch.sigmoid(x)
+        x = torch.abs(x)
         return x
 
 
