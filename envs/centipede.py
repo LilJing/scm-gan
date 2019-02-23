@@ -21,22 +21,32 @@ class GameEnv():
 
     def reset(self):
         self.ale.reset_game()
-        return crop(self.ale.getScreenRGB2())
+        state0 = self.ale.getScreenRGB2()
+        self.ale.act(0)  # No-op
+        state1 = self.ale.getScreenRGB2()
+        return crop(state0, state1)
 
     def step(self, action):
-        reward = self.ale.act(action)
-        state = crop(self.ale.getScreenRGB2())
-        done = self.ale.game_over()
+        # Hard-code two steps per action, pixel-wise max over two frames
+        # Removes flickering
+        reward = 0
+        states = []
+        for _ in range(2):
+            if not self.ale.game_over():
+                reward += self.ale.act(action)
+            states.append(self.ale.getScreenRGB2())
+            done = self.ale.game_over()
+        state = crop(*states)
         info = {'ale.lives': self.ale.lives()}
-        if done:
-            self.reset()
         return state, reward, done, info
 
 
-def crop(state):
-    output = np.zeros((3,64,64))
+def crop(state1, state2):
+    output = np.zeros((3,96,64))
     for c in range(3):
-        output[c] = block_reduce(state[24:-34, 16:-16, c], (3, 2), np.mean) / 255.
+        pixels = np.maximum(state1, state2)
+        output[c] = block_reduce(pixels[24:-34, 16:-16, c], (2, 2), np.max) / 255.
+    # Output format is 96x64 with no flickering
     return output
 
 
@@ -57,17 +67,16 @@ class HeuristicPolicy():
         return action
 
 
-envs = None
+MAX_BATCH_SIZE = 32
+envs = MultiEnvironment([GameEnv() for _ in range(MAX_BATCH_SIZE)])
+states = envs.reset()
 def get_trajectories(batch_size=32, timesteps=10, policy=None, random_start=False):
-    global envs
-    if envs is None:
-        envs = MultiEnvironment([GameEnv() for _ in range(batch_size)])
+    global states
     actions = np.random.randint(envs.action_space.n, size=(batch_size,))
 
     PolicyFn = policy or HeuristicPolicy
     policies = [PolicyFn() for _ in range(batch_size)]
 
-    states = envs.reset()
     t_states, t_rewards, t_dones, t_actions = [], [], [], []
     for t in range(timesteps):
         actions = [p.step(s) for p, s in zip(policies, states)]
@@ -78,19 +87,28 @@ def get_trajectories(batch_size=32, timesteps=10, policy=None, random_start=Fals
         t_dones.append(dones)
         t_actions.append(actions)
     # Reshape to (batch_size, timesteps, ...)
-    states = np.swapaxes(t_states, 0, 1)
-    rewards = np.swapaxes(t_rewards, 0, 1)
-    dones = np.swapaxes(t_dones, 0, 1)
-    actions = np.swapaxes(t_actions, 0, 1)
+    states = np.swapaxes(t_states, 0, 1)[:batch_size]
+    rewards = np.swapaxes(t_rewards, 0, 1)[:batch_size]
+    dones = np.swapaxes(t_dones, 0, 1)[:batch_size]
+    actions = np.swapaxes(t_actions, 0, 1)[:batch_size]
     return states, rewards, dones, actions
 
 
 
 if __name__ == '__main__':
-    states, rewards, dones, actions = get_trajectories(batch_size=1, timesteps=100)
     import imutil
+    print('Simulation time benchmark: Centipede')
+    print('Simulating {} games for 100 timesteps...'.format(MAX_BATCH_SIZE))
     vid = imutil.Video('centipede.mp4', framerate=5)
-    for state, action, reward in zip(states[0], actions[0], rewards[0]):
-        caption = "Prev. Action {} Prev Reward {}".format(action, reward)
-        vid.write_frame(state.transpose(2,0,1), img_padding=8, resize_to=(512,512), caption=caption)
+    start_time = time.time()
+    batches = 10
+    timesteps = 10
+    for _ in range(batches):
+        states, rewards, dones, actions = get_trajectories(timesteps=timesteps)
+        for state, action, reward in zip(states[0], actions[0], rewards[0]):
+            caption = "Prev. Action {} Prev Reward {}".format(action, reward)
+            vid.write_frame(state.transpose(1,2,0), img_padding=8, resize_to=(512,512), caption=caption)
+    duration = time.time() - start_time
+    print('Finished simulating {} games for {} timesteps in {:.3f} sec'.format(
+        MAX_BATCH_SIZE, timesteps*batches, duration))
     vid.finish()

@@ -14,7 +14,6 @@ from tqdm import tqdm
 from spatial_recurrent import CSRN
 from coordconv import CoordConv2d
 
-IMG_SIZE = 64
 INPUT_FRAMES = 3
 INPUT_CHANNELS = 3 * INPUT_FRAMES
 
@@ -151,7 +150,7 @@ class Decoder(nn.Module):
         # Bx8x32x32
         self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*3, (3,3),
                         stride=1, padding=1, groups=latent_size, bias=False)
-        self.bg = nn.Parameter(torch.zeros((3, IMG_SIZE, IMG_SIZE)).cuda())
+        #self.bg = nn.Parameter(torch.zeros((3, IMG_SIZE, IMG_SIZE)).cuda())
         self.cuda()
 
     def forward(self, z_map, visualize=False):
@@ -163,7 +162,7 @@ class Decoder(nn.Module):
 
         x = self.conv2(x)
         # Sum the separate items
-        x = x.view(batch_size, latent_size, 3, IMG_SIZE, IMG_SIZE)
+        x = x.view(batch_size, latent_size, 3, height*2, width*2)
 
         # Optional: Learn to subtract static background, separate from objects
         #x = x + self.bg

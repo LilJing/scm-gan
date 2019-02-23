@@ -49,8 +49,8 @@ def main():
     discriminator = models.Discriminator()
     transition = models.Transition(latent_dim, num_actions)
 
-    #load_from_dir = '.'
-    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_34bddf9c'
+    load_from_dir = '.'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_34bddf9c'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -69,9 +69,11 @@ def main():
     demo_states, _, _, _ = datasource.get_trajectories(batch_size, 10)
     demo_states = torch.Tensor(demo_states).cuda()
 
-    for train_iter in range(0, train_iters):
+    latents_over_time = imutil.Video('latents_over_time.mp4')
+
+    for train_iter in range(1, train_iters):
         theta = (train_iter / train_iters)
-        timesteps = 10 + int(10 * theta)
+        prediction_horizon = 10 + int(10 * theta)
 
         train_mode([encoder, decoder, transition, discriminator])
 
@@ -81,27 +83,34 @@ def main():
         opt_trans.zero_grad()
         opt_pred.zero_grad()
 
-        states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
+        states, rewards, dones, actions = datasource.get_trajectories(batch_size, prediction_horizon)
         states = torch.Tensor(states).cuda()
         rewards = torch.Tensor(rewards).cuda()
         dones = torch.Tensor(dones.astype(int)).cuda()
 
         # Encode the initial state (using the first 3 frames)
         z = encoder(states[:, 0:3])
+        # Given t, t+1, t+2, encoder outputs the state at time t+1
+        # We then step forward one timestep (from t+1) to predict t+2
+        onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
+        z = transition(z, onehot_a)
         z0 = z.clone()
+        """
         if train_iter % 100 == 0:
-            demo_z = encoder(demo_states[:1, :3])[0]
-            imutil.show(demo_z, video_filename='latent_space_training.mjpeg')
+            demo_z = encoder(demo_states[:1, :3])
+            demo_z = transition(demo_z, torch.eye(num_actions)[actions[:, 2]].cuda())
+            frame = imutil.show(demo_z[0], img_padding=10, resize_to=(800, 800), return_pixels=True,
+                        filename='latents_over_training_iter_{:06d}.png'.format(train_iter))
+            latents_over_time.write_frame(frame)
+        """
 
         # Keep track of "done" states to stop predicting a trajectory
         #  once it reaches the end of the game
         active_mask = torch.ones(batch_size).cuda()
 
-        blur = models.GaussianSmoothing(channels=latent_dim, kernel_size=3, sigma=1)
-
         loss = 0
-        # Predict forward in time from t=3
-        for t in range(3, timesteps):
+        # Given the state encoded at t=2, predict state at t=3, t=4, ...
+        for t in range(2, prediction_horizon):
             active_mask = active_mask * (1 - dones[:, t])
 
             # Reconstruction loss
@@ -145,11 +154,22 @@ def main():
             loss += .001 * theta * t_l1_loss
             z = new_z
 
-        # Add an extra consistency loss
-        onehot_a = torch.eye(num_actions)[actions[:, 2]].cuda()
-        t_e_prediction = transition(z0, onehot_a)
-        e_prediction = encoder(states[:, 1:4])
-        consistency_loss = torch.mean((t_e_prediction - e_prediction)**2)
+        # In one experiment measurements of dopamine cells were made while training a monkey to associate
+        # a stimulus with the reward of juice. Initially the dopamine cells increased firing rates when
+        # the monkey received juice, indicating a difference in expected and actual rewards.
+        # Over time this increase in firing back propagated to the earliest reliable stimulus for the reward.
+        # Once the monkey was fully trained, there was no increase in firing rate upon presentation of the
+        # predicted reward. Continually, the firing rate for the dopamine cells decreased below normal
+        # activation when the expected reward was not produced.
+
+        # Predict state t+3 by T(E(s_2), a_2) and also by T(T(E(s_1),a_1),a_2)
+        # They should be consistent: long-term expectations should match later short-term expectations
+        twostep_prediction = transition(z0, torch.eye(num_actions)[actions[:, 2]].cuda())
+        twostep_prediction = transition(twostep_prediction, torch.eye(num_actions)[actions[:, 3]].cuda())
+        onestep_prediction = encoder(states[:, 1:4])
+        onestep_prediction = transition(encoder(states[:, 1:4]), torch.eye(num_actions)[actions[:, 2]].cuda())
+
+        consistency_loss = torch.mean((twostep_prediction - onestep_prediction)**2)
         ts.collect('C t=1', consistency_loss)
         loss += .1 * theta * consistency_loss
 
