@@ -57,7 +57,7 @@ def main():
         decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-decoder.pth')))
         transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
         discriminator.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-discriminator.pth')))
-        #reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward-pred.pth')))
+        reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward-pred.pth')))
 
     # Train the autoencoder
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
@@ -71,7 +71,7 @@ def main():
 
     latents_over_time = imutil.Video('latents_over_time.mp4')
 
-    for train_iter in range(1, train_iters):
+    for train_iter in range(train_iters):
         theta = (train_iter / train_iters)
         prediction_horizon = 10 + int(10 * theta)
 
@@ -238,11 +238,12 @@ def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_a
     # TODO: manage batch size
     assert len(states) > latent_dim
 
-    # Start with latent point t=0 (note: t=0 is a special case)
-    # Note: z_{t=0} is a special case so we use t=1 vs. t=2
+    # Start with latent point t=3
     z = encoder(states[:, 0:3])
+    z = transition(z, torch.eye(num_actions)[actions[:,2]].cuda())
 
-    # Compare z at t=1 and t=2 (discard t=0 because it's a special case)
+    # Now discard t=3 because the agent gets ground truth for it
+    # Compare z at t=4 and t=5, the first two predicted timesteps
     onehot_a = torch.eye(num_actions)[actions[:, 0]].cuda()
     src_z = transition(z, onehot_a)
     onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
@@ -329,6 +330,7 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, rewar
     vid_features = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     vid_separable_conv = imutil.Video('simulation_separable_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:1, 0:3])
+    z = transition(z, torch.eye(num_actions)[actions[:1, 2]].cuda())
     z.detach()
     for t in range(3, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)

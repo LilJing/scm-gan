@@ -33,7 +33,7 @@ class GameEnv():
         states = []
         for _ in range(2):
             if not self.ale.game_over():
-                reward += self.ale.act(action)
+                reward += (self.ale.act(action) > 0)
             states.append(self.ale.getScreenRGB2())
             done = self.ale.game_over()
         state = crop(*states)
@@ -81,30 +81,30 @@ def get_trajectories(batch_size=32, timesteps=10, policy=None, random_start=Fals
     for t in range(timesteps):
         actions = [p.step(s) for p, s in zip(policies, states)]
         actions = actions[:batch_size]  # hack for fixed envs w/ varible batch size
-        states, rewards, dones, _ = envs.step(actions)
-        t_states.append(states)
+        new_states, rewards, dones, _ = envs.step(actions)
+        t_states.append(new_states)
+        for i in range(batch_size):
+            states[i] = new_states[i]
         t_rewards.append(rewards)
         t_dones.append(dones)
         t_actions.append(actions)
     # Reshape to (batch_size, timesteps, ...)
-    states = np.swapaxes(t_states, 0, 1)[:batch_size]
-    rewards = np.swapaxes(t_rewards, 0, 1)[:batch_size]
-    dones = np.swapaxes(t_dones, 0, 1)[:batch_size]
-    actions = np.swapaxes(t_actions, 0, 1)[:batch_size]
-    return states, rewards, dones, actions
+    s, r, d, i = [np.swapaxes(t, 0, 1) for t in (t_states, t_rewards, t_dones, t_actions)]
+    return s, r, d, i
 
 
 
 if __name__ == '__main__':
     import imutil
+    batches = 10
+    timesteps = 100
+    batch_size = 1
     print('Simulation time benchmark: Centipede')
-    print('Simulating {} games for 100 timesteps...'.format(MAX_BATCH_SIZE))
     vid = imutil.Video('centipede.mp4', framerate=5)
     start_time = time.time()
-    batches = 10
-    timesteps = 10
     for _ in range(batches):
-        states, rewards, dones, actions = get_trajectories(timesteps=timesteps)
+        print('Simulating {} timesteps batch size {}...'.format(timesteps, batch_size))
+        states, rewards, dones, actions = get_trajectories(batch_size, timesteps=timesteps)
         for state, action, reward in zip(states[0], actions[0], rewards[0]):
             caption = "Prev. Action {} Prev Reward {}".format(action, reward)
             vid.write_frame(state.transpose(1,2,0), img_padding=8, resize_to=(512,512), caption=caption)
