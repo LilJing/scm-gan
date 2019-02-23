@@ -329,18 +329,19 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, rewar
     vid_simulation = imutil.Video('simulation_only_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     vid_features = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     vid_separable_conv = imutil.Video('simulation_separable_iter_{:06d}.mp4'.format(train_iter), framerate=3)
-    z = encoder(states[:1, 0:3])
-    z = transition(z, torch.eye(num_actions)[actions[:1, 2]].cuda())
+    z = encoder(states[:, :3])
+    z = transition(z, torch.eye(num_actions)[actions[:, 2]].cuda())
     z.detach()
     for t in range(3, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
         estimated_reward = reward_pred(z)
 
         # Render top row: real video vs. simulation from initial conditions
-        pixel_view = torch.cat((states[:, t][:1], x_t[:1]), dim=3)
+        pixel_view = torch.cat((states[:, t], x_t), dim=3)
         caption = 'Pred. t+{} a={} R est={:.2f} R={} min={:.2f} max={:.2f}'.format(
-            t, actions[:1, t], estimated_reward[0], rewards[:1, t], pixel_view.min(), pixel_view.max())
-        top_row = imutil.show(pixel_view.clamp_(0,1), caption=caption, img_padding=8, font_size=10, resize_to=(800,400), return_pixels=True, display=False, save=False)
+            t, actions[:, t], estimated_reward[0], rewards[:, t], pixel_view.min(), pixel_view.max())
+        top_row = imutil.show(pixel_view.clamp_(0,1), caption=caption, img_padding=8, font_size=10,
+                              resize_to=(800,400), return_pixels=True, display=False, save=False)
         caption = 'Left: Real          Right: Simulated from initial conditions t={}'.format(t)
         vid_simulation.write_frame(pixel_view.clamp(0, 1), caption=caption, resize_to=(1280,640))
 
