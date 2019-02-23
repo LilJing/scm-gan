@@ -121,10 +121,12 @@ def main():
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
 
+            """
             l1_values = z.abs().mean(-1).mean(-1).mean(-1)
             l1_loss = torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
             loss += .001 * theta * l1_loss
+            """
 
             # Spatially-Coherent Log-Determinant independence loss
             # Sample 1000 random latent vector spatial points from the batch
@@ -143,7 +145,7 @@ def main():
             actual_reward = rewards[:, t]
             reward_difference = torch.mean((expected_reward - actual_reward)**2 * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += .01 * reward_difference
+            loss += .001 * reward_difference
 
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
@@ -171,7 +173,7 @@ def main():
 
         consistency_loss = torch.mean((twostep_prediction - onestep_prediction)**2)
         ts.collect('C t=1', consistency_loss)
-        loss += .1 * theta * consistency_loss
+        loss += .01 * theta * consistency_loss
 
         loss.backward()
 
@@ -291,8 +293,8 @@ def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_a
 
 def visualize_reconstruction(datasource, encoder, decoder, transition, train_iter=0):
     # Image of reconstruction
-    num_actions = 6
     filename = 'vis_iter_{:06d}.png'.format(train_iter)
+    num_actions = datasource.NUM_ACTIONS
     timesteps = 60
     batch_size = 1
     states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
