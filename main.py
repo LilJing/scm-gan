@@ -60,16 +60,18 @@ def main():
         reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward-pred.pth')))
 
     # Train the autoencoder
-    opt_enc = torch.optim.Adam(encoder.parameters(), lr=.01)
-    opt_dec = torch.optim.Adam(decoder.parameters(), lr=.01)
-    opt_trans = torch.optim.Adam(transition.parameters(), lr=.01)
-    opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.01)
-    opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.01)
+    opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
+    opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
+    opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
+    opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.001)
+    opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.001)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
+
     demo_states, _, _, _ = datasource.get_trajectories(batch_size, 10)
     demo_states = torch.Tensor(demo_states).cuda()
-
     latents_over_time = imutil.Video('latents_over_time.mp4')
+
+    blur = models.GaussianSmoothing(channels=1, kernel_size=5, sigma=3)
 
     for train_iter in range(train_iters):
         theta = (train_iter / train_iters)
@@ -113,20 +115,27 @@ def main():
         for t in range(2, prediction_horizon):
             active_mask = active_mask * (1 - dones[:, t])
 
+            # Predict reward
+            expected_reward = reward_predictor(z)
+            actual_reward = rewards[:, t]
+            reward_difference = torch.mean((expected_reward - actual_reward)**2 * active_mask)
+            ts.collect('Rd Loss t={}'.format(t), reward_difference)
+            loss += .001 * reward_difference
+
             # Reconstruction loss
             expected = states[:, t]
             predicted = decoder(z)
-            mse_difference = ((expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
+            foreground_mask = blur(expected.mean(dim=-3, keepdim=True)**2)
+            mse_difference = (foreground_mask * (expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
             rec_loss = torch.mean(mse_difference * active_mask)
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
 
-            """
-            l1_values = z.abs().mean(-1).mean(-1).mean(-1)
-            l1_loss = torch.mean(l1_values * active_mask)
-            ts.collect('L1 t={}'.format(t), l1_loss)
-            loss += .001 * theta * l1_loss
-            """
+            # Apply activation L1 loss
+            #l1_values = z.abs().mean(-1).mean(-1).mean(-1)
+            #l1_loss = torch.mean(l1_values * active_mask)
+            #ts.collect('L1 t={}'.format(t), l1_loss)
+            #loss += .001 * theta * l1_loss
 
             # Spatially-Coherent Log-Determinant independence loss
             # Sample 1000 random latent vector spatial points from the batch
@@ -140,40 +149,26 @@ def main():
             #ts.collect('Log-Det t={}'.format(t), log_det_penalty)
             #loss += log_det_penalty
 
-            # Predict reward
-            expected_reward = reward_predictor(z)
-            actual_reward = rewards[:, t]
-            reward_difference = torch.mean((expected_reward - actual_reward)**2 * active_mask)
-            ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += .001 * reward_difference
-
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
-            t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
-            t_l1_loss = torch.mean(t_l1_values * active_mask)
-            ts.collect('T-L1 t={}'.format(t), t_l1_loss)
-            loss += .001 * theta * t_l1_loss
+            # Apply transition L1 loss
+            #t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
+            #t_l1_loss = torch.mean(t_l1_values * active_mask)
+            #ts.collect('T-L1 t={}'.format(t), t_l1_loss)
+            #loss += .001 * theta * t_l1_loss
             z = new_z
 
-        # In one experiment measurements of dopamine cells were made while training a monkey to associate
-        # a stimulus with the reward of juice. Initially the dopamine cells increased firing rates when
-        # the monkey received juice, indicating a difference in expected and actual rewards.
-        # Over time this increase in firing back propagated to the earliest reliable stimulus for the reward.
-        # Once the monkey was fully trained, there was no increase in firing rate upon presentation of the
-        # predicted reward. Continually, the firing rate for the dopamine cells decreased below normal
-        # activation when the expected reward was not produced.
-
+        # Apply TD-RNN loss
         # Predict state t+3 by T(E(s_2), a_2) and also by T(T(E(s_1),a_1),a_2)
         # They should be consistent: long-term expectations should match later short-term expectations
-        twostep_prediction = transition(z0, torch.eye(num_actions)[actions[:, 2]].cuda())
-        twostep_prediction = transition(twostep_prediction, torch.eye(num_actions)[actions[:, 3]].cuda())
-        onestep_prediction = encoder(states[:, 1:4])
-        onestep_prediction = transition(encoder(states[:, 1:4]), torch.eye(num_actions)[actions[:, 2]].cuda())
-
-        consistency_loss = torch.mean((twostep_prediction - onestep_prediction)**2)
-        ts.collect('C t=1', consistency_loss)
-        loss += .01 * theta * consistency_loss
+        #twostep_prediction = transition(z0, torch.eye(num_actions)[actions[:, 2]].cuda())
+        #twostep_prediction = transition(twostep_prediction, torch.eye(num_actions)[actions[:, 3]].cuda())
+        #onestep_prediction = encoder(states[:, 1:4])
+        #onestep_prediction = transition(encoder(states[:, 1:4]), torch.eye(num_actions)[actions[:, 2]].cuda())
+        #consistency_loss = torch.mean((twostep_prediction - onestep_prediction)**2)
+        #ts.collect('C t=1', consistency_loss)
+        #loss += .01 * theta * consistency_loss
 
         loss.backward()
 
