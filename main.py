@@ -60,11 +60,11 @@ def main():
         reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward-pred.pth')))
 
     # Train the autoencoder
-    opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
-    opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
-    opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
-    opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.0005)
-    opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.0005)
+    opt_enc = torch.optim.Adam(encoder.parameters(), lr=.01)
+    opt_dec = torch.optim.Adam(decoder.parameters(), lr=.01)
+    opt_trans = torch.optim.Adam(transition.parameters(), lr=.01)
+    opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.01)
+    opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.01)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
     demo_states, _, _, _ = datasource.get_trajectories(batch_size, 10)
     demo_states = torch.Tensor(demo_states).cuda()
@@ -73,7 +73,7 @@ def main():
 
     for train_iter in range(train_iters):
         theta = (train_iter / train_iters)
-        prediction_horizon = 10 + int(10 * theta)
+        prediction_horizon = 5# + int(10 * theta)
 
         train_mode([encoder, decoder, transition, discriminator])
 
@@ -141,7 +141,7 @@ def main():
             # Predict reward
             expected_reward = reward_predictor(z)
             actual_reward = rewards[:, t]
-            reward_difference = torch.sum((expected_reward - actual_reward)**2 * active_mask)
+            reward_difference = torch.mean((expected_reward - actual_reward)**2 * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
             loss += .01 * reward_difference
 
