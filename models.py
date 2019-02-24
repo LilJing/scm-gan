@@ -158,7 +158,7 @@ class Decoder(nn.Module):
 
         x = self.conv1(z_map)
         #x = self.bn_conv1(x)
-        x = F.relu(x)
+        x = F.leaky_relu(x)
 
         x = self.conv2(x)
         # Sum the separate items
