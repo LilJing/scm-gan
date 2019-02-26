@@ -24,6 +24,7 @@ from tqdm import tqdm
 
 parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
 parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-v0, etc (see envs/ for list)')
+parser.add_argument('--load-from', required=True, help='Directory containing .pth models (default: .)')
 args = parser.parse_args()
 
 
@@ -50,7 +51,8 @@ def main():
     transition = models.Transition(latent_dim, num_actions)
 
     #load_from_dir = '.'
-    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_07dc24bf'
+    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_07dc24bf'
+    load_from_dir = args.load_from or '.'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -72,8 +74,7 @@ def main():
 
     for train_iter in range(train_iters):
         theta = (train_iter / train_iters)
-        #prediction_horizon = 5 + int(5 * theta)
-        prediction_horizon = 15
+        prediction_horizon = 5 + int(5 * theta)
 
         train_mode([encoder, decoder, transition, discriminator])
 
@@ -92,6 +93,7 @@ def main():
         z = encoder(states[:, 0:3])
         # Given t, t+1, t+2, encoder outputs the state at time t+1
         # We then step forward one timestep (from t+1) to predict t+2
+        # actions[:, 2] is the action taken after seeing s_2- ie. a_t = \pi(s_t)
         onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
         z = transition(z, onehot_a)
         z0 = z.clone()
@@ -177,15 +179,16 @@ def main():
 
         # Periodically generate visualizations
         if train_iter % 1000 == 0:
+            compute_causal_graph(encoder, transition, datasource, iter=train_iter)
             visualize_reconstruction(datasource, encoder, decoder, transition, train_iter=train_iter)
-
-        if train_iter % 1000 == 0:
             visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
 
         # Periodically compute expensive metrics
+        """
         if train_iter % 1000 == 0 and hasattr(datasource, 'simulator'):
             disentanglement_score = higgins_metric_conv(datasource.simulator,
                datasource.TRUE_LATENT_DIM, encoder, latent_dim)
+        """
 
         # Periodically save the network
         if train_iter % 1000 == 0:
@@ -195,9 +198,6 @@ def main():
             torch.save(decoder.state_dict(), 'model-decoder.pth')
             torch.save(discriminator.state_dict(), 'model-discriminator.pth')
             torch.save(reward_predictor.state_dict(), 'model-reward-pred.pth')
-
-        if train_iter % 1000 == 0:
-            compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions, iter=train_iter)
 
     print(ts)
     print('Finished')
@@ -219,19 +219,50 @@ def train_mode(networks):
                 child.momentum = 0.1
 
 
-def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_actions, iter=0):
-    # TODO: manage batch size
-    assert len(states) > latent_dim
+def compute_causal_graph(encoder, transition, datasource, iter=0):
+    # Max over 10 runs
+    weights_runs = []
+    for i in range(10):
+        src_z, onehot_a = sample_transition(encoder, transition, datasource)
+        causal_edge_weights = compute_causal_edge_weights(src_z, transition, onehot_a)
+        weights_runs.append(causal_edge_weights)
+    causal_edge_weights = np.max(weights_runs, axis=0)
+    imutil.show(causal_edge_weights, resize_to=(256,256),
+                filename='causal_matrix_iter_{:06d}.png'.format(iter))
+
+    latent_dim = src_z.shape[1]
+    print('Causal Graph Edge Weights')
+    print('Latent Factor -> Latent Factor dim={}'.format(latent_dim))
+    for i in range(causal_edge_weights.shape[0]):
+        for j in range(causal_edge_weights.shape[1]):
+            print('{:.03f}\t'.format(causal_edge_weights[i,j]), end='')
+        print('')
+    graph_img = render_causal_graph(causal_edge_weights)
+    imutil.show(graph_img, filename='causal_graph_iter_{:06d}.png'.format(iter))
+
+
+def sample_transition(encoder, transition, datasource, batch_size=32):
+    horizon = 5  # 3 frame encoder input followed by two predicted steps
+    num_actions = datasource.NUM_ACTIONS
+    states, rewards, dones, actions = datasource.get_trajectories(batch_size, horizon)
+    states = torch.Tensor(states).cuda()
+    rewards = torch.Tensor(rewards).cuda()
+    dones = torch.Tensor(dones.astype(int)).cuda()
 
     # Start with latent point t=3
     z = encoder(states[:, 0:3])
     z = transition(z, torch.eye(num_actions)[actions[:,2]].cuda())
+    latent_dim = z.shape[1]
 
     # Now discard t=3 because the agent gets ground truth for it
     # Compare z at t=4 and t=5, the first two predicted timesteps
-    onehot_a = torch.eye(num_actions)[actions[:, 0]].cuda()
-    src_z = transition(z, onehot_a)
-    onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
+    src_z = transition(z, torch.eye(num_actions)[actions[:, 3]].cuda())
+    onehot_a = torch.eye(num_actions)[actions[:, 4]].cuda()
+    return src_z, onehot_a
+
+
+def compute_causal_edge_weights(src_z, transition, onehot_a):
+    latent_dim = src_z.shape[1]
     dst_z = transition(src_z, onehot_a)
 
     # Edge weights for the causal graph: close-to-zero weights can be pruned
@@ -239,7 +270,7 @@ def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_a
 
     # For each latent factor, check which other factors it "causes"
     # by computing a counterfactual s_{t+1}
-    print("Generating counterfactual perturbations for latent factors dim {}".format(latent_dim))
+    #print("Generating counterfactual perturbations for latent factors dim {}".format(latent_dim))
     for src_factor_idx in range(latent_dim):
         # The next timestep (according to our model)
         ground_truth_outcome = dst_z
@@ -256,22 +287,13 @@ def compute_causal_graph(encoder, transition, states, actions, latent_dim, num_a
         cf_difference = (ground_truth_outcome - counterfactual_outcome)**2
         for dst_factor_idx in range(latent_dim):
             edge_weight = float(cf_difference[:,dst_factor_idx].max())
-            print("Factor {} -> Factor {} causal strength: {:.04f}".format(
-                src_factor_idx, dst_factor_idx, edge_weight))
+            #print("Factor {} -> Factor {} causal strength: {:.04f}".format(src_factor_idx, dst_factor_idx, edge_weight))
             causal_edge_weights[src_factor_idx, dst_factor_idx] = edge_weight
-    print("Finished generating counterfactual perturbations")
+    #print("Finished generating counterfactual perturbations")
 
-    print("Normalizing counterfactual perturbations to max {}".format(causal_edge_weights.max()))
+    #print("Normalizing counterfactual perturbations to max {}".format(causal_edge_weights.max()))
     causal_edge_weights /= causal_edge_weights.max()
-
-    print('Causal Graph Edge Weights')
-    print('Latent Factor -> Latent Factor dim={}'.format(latent_dim))
-    for i in range(causal_edge_weights.shape[0]):
-        for j in range(causal_edge_weights.shape[1]):
-            print('{:.03f}\t'.format(causal_edge_weights[i,j]), end='')
-        print('')
-    graph_img = render_causal_graph(causal_edge_weights)
-    imutil.show(graph_img, filename='causal_graph_iter_{:06d}.png'.format(iter))
+    return causal_edge_weights
 
 
 def visualize_reconstruction(datasource, encoder, decoder, transition, train_iter=0):
