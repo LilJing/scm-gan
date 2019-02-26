@@ -112,12 +112,14 @@ def draw_rect(pixels, center_x, center_y, width, height, color):
 def get_trajectories(batch_size=32, timesteps=10, policy='random', random_start=False):
     envs = MultiEnvironment([BetterPongEnv() for _ in range(batch_size)])
     t_states, t_rewards, t_dones, t_actions = [], [], [], []
+    # Initial actions/stats
+    actions = np.random.randint(envs.action_space.n, size=(batch_size,))
     for t in range(timesteps):
+        states, rewards, dones, _ = envs.step(actions)
         if policy == 'random':
             actions = np.random.randint(envs.action_space.n, size=(batch_size,))
         if policy == 'repeat':
             actions = [i % envs.action_space.n for i in range(batch_size)]
-        states, rewards, dones, _ = envs.step(actions)
         t_states.append(states)
         t_rewards.append(rewards)
         t_dones.append(dones)
