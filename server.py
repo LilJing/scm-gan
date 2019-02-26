@@ -25,7 +25,7 @@ class GameEnv():
 
 def reset_game():
     global env
-    env = GameEnv('centipede')
+    env = GameEnv('space_invaders')
     state = env.reset()
     imutil.show(state, filename='static/screenshot.jpg')
 

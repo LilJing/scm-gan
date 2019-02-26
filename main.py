@@ -49,8 +49,8 @@ def main():
     discriminator = models.Discriminator()
     transition = models.Transition(latent_dim, num_actions)
 
-    load_from_dir = '.'
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_34bddf9c'
+    #load_from_dir = '.'
+    load_from_dir = '/mnt/nfs/experiments/default/scm-gan_62406a42'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
         encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
@@ -75,7 +75,8 @@ def main():
 
     for train_iter in range(train_iters):
         theta = (train_iter / train_iters)
-        prediction_horizon = 5# + int(10 * theta)
+        #prediction_horizon = 5 + int(5 * theta)
+        prediction_horizon = 15
 
         train_mode([encoder, decoder, transition, discriminator])
 
@@ -120,22 +121,23 @@ def main():
             actual_reward = rewards[:, t]
             reward_difference = torch.mean((expected_reward - actual_reward)**2 * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += .001 * reward_difference
+            loss += .1 * reward_difference
 
             # Reconstruction loss
             expected = states[:, t]
             predicted = decoder(z)
-            foreground_mask = blur(expected.mean(dim=-3, keepdim=True)**2)
+            bg_mse_multiplier = 0.1
+            foreground_mask = (1 - bg_mse_multiplier) * blur(expected.mean(dim=-3, keepdim=True)**2) + bg_mse_multiplier
             mse_difference = (foreground_mask * (expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
             rec_loss = torch.mean(mse_difference * active_mask)
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
 
             # Apply activation L1 loss
-            #l1_values = z.abs().mean(-1).mean(-1).mean(-1)
-            #l1_loss = torch.mean(l1_values * active_mask)
-            #ts.collect('L1 t={}'.format(t), l1_loss)
-            #loss += .001 * theta * l1_loss
+            l1_values = z.abs().mean(-1).mean(-1).mean(-1)
+            l1_loss = torch.mean(l1_values * active_mask)
+            ts.collect('L1 t={}'.format(t), l1_loss)
+            loss += .01 * theta * l1_loss
 
             # Spatially-Coherent Log-Determinant independence loss
             # Sample 1000 random latent vector spatial points from the batch
@@ -153,22 +155,22 @@ def main():
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
             # Apply transition L1 loss
-            #t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
-            #t_l1_loss = torch.mean(t_l1_values * active_mask)
-            #ts.collect('T-L1 t={}'.format(t), t_l1_loss)
-            #loss += .001 * theta * t_l1_loss
+            t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
+            t_l1_loss = torch.mean(t_l1_values * active_mask)
+            ts.collect('T-L1 t={}'.format(t), t_l1_loss)
+            loss += .01 * theta * t_l1_loss
             z = new_z
 
         # Apply TD-RNN loss
         # Predict state t+3 by T(E(s_2), a_2) and also by T(T(E(s_1),a_1),a_2)
         # They should be consistent: long-term expectations should match later short-term expectations
-        #twostep_prediction = transition(z0, torch.eye(num_actions)[actions[:, 2]].cuda())
-        #twostep_prediction = transition(twostep_prediction, torch.eye(num_actions)[actions[:, 3]].cuda())
-        #onestep_prediction = encoder(states[:, 1:4])
-        #onestep_prediction = transition(encoder(states[:, 1:4]), torch.eye(num_actions)[actions[:, 2]].cuda())
-        #consistency_loss = torch.mean((twostep_prediction - onestep_prediction)**2)
-        #ts.collect('C t=1', consistency_loss)
-        #loss += .01 * theta * consistency_loss
+        twostep_prediction = transition(z0, torch.eye(num_actions)[actions[:, 2]].cuda())
+        twostep_prediction = transition(twostep_prediction, torch.eye(num_actions)[actions[:, 3]].cuda())
+        onestep_prediction = encoder(states[:, 1:4])
+        onestep_prediction = transition(encoder(states[:, 1:4]), torch.eye(num_actions)[actions[:, 2]].cuda())
+        consistency_loss = torch.mean((twostep_prediction - onestep_prediction)**2)
+        ts.collect('TDC 2:1', consistency_loss)
+        loss += .1 * theta * consistency_loss
 
         loss.backward()
 
