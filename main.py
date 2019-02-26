@@ -67,21 +67,14 @@ def main():
     opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.001)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
 
-    #demo_states, _, _, _ = datasource.get_trajectories(batch_size, 10)
-    #demo_states = torch.Tensor(demo_states).cuda()
-    #latents_over_time = imutil.Video('latents_over_time.mp4')
-
     # Blur for foreground mask
     blur = models.GaussianSmoothing(channels=1, kernel_size=5, sigma=3)
 
-    sparsify_network(transition, theta=0.05)
-
     for train_iter in range(train_iters):
-        theta = 1 + (train_iter / train_iters)
+        theta = (train_iter / train_iters)
         #prediction_horizon = 5 + int(5 * theta)
         prediction_horizon = 15
 
-        """
         train_mode([encoder, decoder, transition, discriminator])
 
         # Train encoder/transition/decoder
@@ -102,12 +95,6 @@ def main():
         onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
         z = transition(z, onehot_a)
         z0 = z.clone()
-        #if train_iter % 100 == 0:
-        #    demo_z = encoder(demo_states[:1, :3])
-        #    demo_z = transition(demo_z, torch.eye(num_actions)[actions[:, 2]].cuda())
-        #    frame = imutil.show(demo_z[0], img_padding=10, resize_to=(800, 800), return_pixels=True,
-        #                filename='latents_over_training_iter_{:06d}.png'.format(train_iter))
-        #    latents_over_time.write_frame(frame)
 
         # Keep track of "done" states to stop predicting a trajectory
         #  once it reaches the end of the game
@@ -181,7 +168,6 @@ def main():
         opt_trans.step()
         opt_pred.step()
         ts.print_every(2)
-        """
 
         test_mode([encoder, decoder, transition, discriminator])
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, prediction_horizon)
@@ -212,38 +198,9 @@ def main():
 
         if train_iter % 1000 == 0:
             compute_causal_graph(encoder, transition, states, actions, latent_dim=latent_dim, num_actions=num_actions, iter=train_iter)
-        exit()
 
     print(ts)
     print('Finished')
-
-
-def sparsify_network(network, theta=0.1):
-    print('Pruning network {}'.format(network))
-    total_elements = 0
-    total_zeros = 0
-    for p in network.parameters():
-        # TODO: skip bias and batch norm params?
-        if len(p.shape) < 2:
-            continue
-        sparsify_tensor(p, theta)
-        num_elements = p.nelement()
-        num_zeros = torch.sum(p.data == 0).item()
-        sparsity = num_zeros / num_elements
-        total_elements += num_elements
-        total_zeros += num_zeros
-        print('Layer {} is {:.03f}% sparse'.format(type(p), 100 * sparsity))
-    print('Network {} is {:.03f}% sparse'.format(type(network), 100 * total_zeros / total_elements))
-    return total_zeros / total_elements
-
-
-# Select all parameters with values close to zero.
-# Set these parameters to zero.
-def sparsify_tensor(W, theta):
-    threshold = torch.mean(W.data**2) * theta
-    idxs = W.data**2 < threshold
-    W.data[idxs] = 0
-    return W
 
 
 def test_mode(networks):
