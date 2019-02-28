@@ -124,19 +124,12 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
 
 
 def convert_frame(state, width=64, height=64):
-    map_features, map_rgb, screen_features, screen_rgb = state
-    state = imutil.get_pixels(screen_rgb, width, height)
-    state = state.transpose((2,0,1))
-    return state
+    feature_map, feature_screen, rgb_map, rgb_screen = state
+    imutil.show(feature_screen, filename='tmp.png')
+    # Reconstruct the feature map
+    return feature_screen
 
 
 if __name__ == '__main__':
-    ENV_NAME = sys.argv[1]
-    start_time = time.time()
-    batch_size = 8
-    MAX_ITERS = 1000
-    for i in range(0, MAX_ITERS, batch_size):
-        get_trajectories(batch_size)
-        duration = time.time() - start_time
-        print('Generated {} trajectories in {:.03f} sec ({:.02f} traj/sec) replay buffer len {}'.format(
-            i, duration, i / duration, len(replay_buffer)))
+    env = ZerglingDefenseEnvironment()
+    play_game_thread()
