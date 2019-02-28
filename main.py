@@ -61,7 +61,7 @@ def main():
         decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-decoder.pth')))
         transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
         discriminator.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-discriminator.pth')))
-        #reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward_predictor.pth')))
+        reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward_predictor.pth')))
         rgb_decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-rgb_decoder.pth')))
 
     # Train the autoencoder
@@ -199,9 +199,10 @@ def main():
             test_mode([encoder, decoder, rgb_decoder, transition, discriminator])
             # TODO: visualize pysc2 features
             filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
-            caption = 'Left: Input, Right: Neural Reconstruction (iteration {:06d})'.format(train_iter)
+            est_reward = reward_predictor(z0)[0].data.cpu().numpy()
+            caption = 'Left: Input, Right: Generated. iter: {:06d} R: {}'.format(train_iter, est_reward)
             pixels = torch.cat([expected[0], actual[0]], dim=-1)
-            imutil.show(pixels * 255., filename=filename, caption=caption, normalize=False)
+            imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
 
             """
             # Periodically generate visualizations
