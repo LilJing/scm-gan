@@ -48,6 +48,7 @@ def main():
     decoder = models.Decoder(latent_dim)
     reward_predictor = models.RewardPredictor(latent_dim)
     discriminator = models.Discriminator()
+    rgb_decoder = models.RGBDecoder()
     transition = models.Transition(latent_dim, num_actions)
 
     #load_from_dir = '.'
@@ -59,7 +60,8 @@ def main():
         decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-decoder.pth')))
         transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
         discriminator.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-discriminator.pth')))
-        reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward-pred.pth')))
+        reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward_predictor.pth')))
+        rgb_decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-rgb_decoder.pth')))
 
     # Train the autoencoder
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
@@ -67,6 +69,7 @@ def main():
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.001)
     opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.001)
+    opt_rgb = torch.optim.Adam(rgb_decoder.parameters(), lr=.01)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
 
     # Blur for foreground mask
@@ -76,7 +79,7 @@ def main():
         theta = (train_iter / train_iters)
         prediction_horizon = 5 + int(5 * theta)
 
-        train_mode([encoder, decoder, transition, discriminator])
+        train_mode([encoder, decoder, rgb_decoder, transition, discriminator])
 
         # Train encoder/transition/decoder
         opt_enc.zero_grad()
@@ -84,8 +87,9 @@ def main():
         opt_trans.zero_grad()
         opt_pred.zero_grad()
 
-        states, rewards, dones, actions = datasource.get_trajectories(batch_size, prediction_horizon)
+        states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size, prediction_horizon)
         states = torch.Tensor(states).cuda()
+        rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
         rewards = torch.Tensor(rewards).cuda()
         dones = torch.Tensor(dones.astype(int)).cuda()
 
@@ -110,25 +114,28 @@ def main():
             # Predict reward
             expected_reward = reward_predictor(z)
             actual_reward = rewards[:, t]
-            reward_difference = torch.mean((expected_reward - actual_reward)**2 * active_mask)
+            reward_difference = torch.mean(torch.abs(expected_reward - actual_reward) * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
             loss += .0 * reward_difference
 
             # Reconstruction loss
             expected = states[:, t]
             predicted = decoder(z)
-            bg_mse_multiplier = 0.1
-            foreground_mask = (1 - bg_mse_multiplier) * blur(expected.mean(dim=-3, keepdim=True)**2) + bg_mse_multiplier
-            mse_difference = (foreground_mask * (expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
-            rec_loss = torch.mean(mse_difference * active_mask)
+            #bg_mse_multiplier = 0.1
+            #foreground_mask = (1 - bg_mse_multiplier) * blur(expected.mean(dim=-3, keepdim=True)**2) + bg_mse_multiplier
+            #mse_difference = (foreground_mask * (expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
+            #rec_loss = torch.mean(mse_difference * active_mask)
+            rec_loss = torch.mean((expected - predicted) **2)
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
 
+            '''
             # Apply activation L1 loss
             l1_values = z.abs().mean(-1).mean(-1).mean(-1)
             l1_loss = torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
             loss += .01 * theta * l1_loss
+            '''
 
             # Spatially-Coherent Log-Determinant independence loss
             # Sample 1000 random latent vector spatial points from the batch
@@ -145,13 +152,16 @@ def main():
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
+            '''
             # Apply transition L1 loss
             t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
             t_l1_loss = torch.mean(t_l1_values * active_mask)
             ts.collect('T-L1 t={}'.format(t), t_l1_loss)
             loss += .01 * theta * t_l1_loss
+            '''
             z = new_z
 
+        '''
         # Apply TD-RNN loss
         # Predict state t+3 by T(E(s_2), a_2) and also by T(T(E(s_1),a_1),a_2)
         # They should be consistent: long-term expectations should match later short-term expectations
@@ -162,6 +172,7 @@ def main():
         consistency_loss = torch.mean((twostep_prediction - onestep_prediction)**2)
         ts.collect('TDC 2:1', consistency_loss)
         loss += .1 * theta * consistency_loss
+        '''
 
         loss.backward()
 
@@ -171,33 +182,42 @@ def main():
         opt_pred.step()
         ts.print_every(2)
 
-        test_mode([encoder, decoder, transition, discriminator])
-        states, rewards, dones, actions = datasource.get_trajectories(batch_size, prediction_horizon)
-        states = torch.Tensor(states).cuda()
-        rewards = torch.Tensor(rewards).cuda()
-        dones = torch.Tensor(dones.astype(int)).cuda()
+        ##### Separately, train an RGB-decoder
+        ##### This converts from features to pixels
+        opt_rgb.zero_grad()
+        expected = rgb_states[:, 2]
+        actual = rgb_decoder(decoder(z0).detach())
+        rgb_loss = torch.mean((expected - actual)**2)
+        rgb_loss.backward()
+        opt_rgb.step()
 
-        # Periodically generate visualizations
-        if train_iter % 1000 == 0:
+        if train_iter % 100 == 0:
+            print('Evaluating networks...')
+            test_mode([encoder, decoder, rgb_decoder, transition, discriminator])
+            # TODO: visualize pysc2 features
+            filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
+            caption = 'Left: True, Right: Simulated'
+            pixels = torch.cat([expected[0], actual[0]], dim=-1)
+            imutil.show(pixels * 255., filename=filename, caption=caption, normalize=False)
+
+            """
+            # Periodically generate visualizations
             compute_causal_graph(encoder, transition, datasource, iter=train_iter)
             visualize_reconstruction(datasource, encoder, decoder, transition, train_iter=train_iter)
             visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
 
-        # Periodically compute expensive metrics
-        """
-        if train_iter % 1000 == 0 and hasattr(datasource, 'simulator'):
-            disentanglement_score = higgins_metric_conv(datasource.simulator,
-               datasource.TRUE_LATENT_DIM, encoder, latent_dim)
-        """
-
-        # Periodically save the network
-        if train_iter % 1000 == 0:
+            # Periodically compute expensive metrics
+            if hasattr(datasource, 'simulator'):
+                disentanglement_score = higgins_metric_conv(datasource.simulator, datasource.TRUE_LATENT_DIM, encoder, latent_dim)
+            """
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
             torch.save(decoder.state_dict(), 'model-decoder.pth')
             torch.save(discriminator.state_dict(), 'model-discriminator.pth')
-            torch.save(reward_predictor.state_dict(), 'model-reward-pred.pth')
+            torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
+            torch.save(rgb_decoder.state_dict(), 'model-rgb_decoder.pth')
+
 
     print(ts)
     print('Finished')
