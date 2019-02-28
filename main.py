@@ -112,7 +112,7 @@ def main():
             actual_reward = rewards[:, t]
             reward_difference = torch.mean((expected_reward - actual_reward)**2 * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += .5 * reward_difference
+            loss += .0 * reward_difference
 
             # Reconstruction loss
             expected = states[:, t]
