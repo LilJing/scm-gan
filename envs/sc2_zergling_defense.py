@@ -16,6 +16,7 @@ MAX_TRAJECTORY_LEN = 20
 MAX_EPISODES_PER_ENVIRONMENT = 500
 BURN_STATES_BEFORE_START = 0
 NUM_ACTIONS = 5
+NUM_REWARDS = 4
 NO_OP_ACTION = 4
 
 replay_buffer = []
@@ -61,7 +62,7 @@ def play_episode(env, policy):
     state = env.reset()
     for _ in range(BURN_STATES_BEFORE_START):
         state, _, _, _ = env.step(action=0)
-    reward = 0
+    reward = np.zeros(NUM_REWARDS)
     done = False
     while True:
         action = policy(state)
@@ -74,7 +75,8 @@ def play_episode(env, policy):
             done = True
         if done:
             break
-        state, reward, done, info = env.step(action)
+        state, reward_sum, done, info = env.step(action)
+        reward = np.array(list(info.values()))
     trajectory = (np.array(states), np.array(rgb_states), np.array(rewards), np.array(actions))
     add_to_replay_buffer(trajectory)
 

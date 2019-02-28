@@ -44,9 +44,10 @@ def main():
 
     datasource = select_environment(args.env)
     num_actions = datasource.NUM_ACTIONS
+    num_rewards = datasource.NUM_REWARDS
     encoder = models.Encoder(latent_dim)
     decoder = models.Decoder(latent_dim)
-    reward_predictor = models.RewardPredictor(latent_dim)
+    reward_predictor = models.RewardPredictor(latent_dim, num_rewards)
     discriminator = models.Discriminator()
     rgb_decoder = models.RGBDecoder()
     transition = models.Transition(latent_dim, num_actions)
@@ -60,7 +61,7 @@ def main():
         decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-decoder.pth')))
         transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
         discriminator.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-discriminator.pth')))
-        reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward_predictor.pth')))
+        #reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward_predictor.pth')))
         rgb_decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-rgb_decoder.pth')))
 
     # Train the autoencoder
@@ -114,9 +115,10 @@ def main():
             # Predict reward
             expected_reward = reward_predictor(z)
             actual_reward = rewards[:, t]
-            reward_difference = torch.mean(torch.abs(expected_reward - actual_reward) * active_mask)
+            reward_difference = torch.mean(torch.mean(torch.abs(expected_reward - actual_reward), dim=1) * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += .0 * reward_difference
+            print('Expected reward: {}'.format(expected_reward[0].data.cpu().numpy()))
+            loss += .001 * reward_difference
 
             # Reconstruction loss
             expected = states[:, t]
@@ -188,6 +190,7 @@ def main():
         expected = rgb_states[:, 2]
         actual = rgb_decoder(decoder(z0).detach())
         rgb_loss = torch.mean((expected - actual)**2)
+        ts.collect('RGB loss', rgb_loss)
         rgb_loss.backward()
         opt_rgb.step()
 
@@ -196,7 +199,7 @@ def main():
             test_mode([encoder, decoder, rgb_decoder, transition, discriminator])
             # TODO: visualize pysc2 features
             filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
-            caption = 'Left: True, Right: Simulated'
+            caption = 'Left: Input, Right: Neural Reconstruction (iteration {:06d})'.format(train_iter)
             pixels = torch.cat([expected[0], actual[0]], dim=-1)
             imutil.show(pixels * 255., filename=filename, caption=caption, normalize=False)
 

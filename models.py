@@ -126,17 +126,20 @@ class Discriminator(nn.Module):
 
 
 class RewardPredictor(nn.Module):
-    def __init__(self, latent_dim):
+    def __init__(self, latent_dim, num_rewards):
         super().__init__()
-        self.conv1 = nn.Conv2d(latent_dim, 32, (3,3), stride=1, padding=0)
-        self.conv2 = nn.Conv2d(32, 1, (3,3), stride=1, padding=0)
+        self.conv1 = nn.Conv2d(latent_dim, 64, (3,3), stride=1, padding=0)
+        self.conv2 = nn.Conv2d(64, 32, (3,3), stride=1, padding=0)
+        self.conv3 = nn.Conv2d(32, num_rewards, (3,3), stride=2, padding=0)
         self.cuda()
 
     def forward(self, x):
         x = self.conv1(x)
-        x = F.relu(x)
+        x = F.leaky_relu(x)
         x = self.conv2(x)
-        return x.mean(-1).mean(-1).sum(-1)
+        x = F.leaky_relu(x)
+        x = self.conv3(x)
+        return x.sum(-1).sum(-1)
 
 
 class Decoder(nn.Module):
