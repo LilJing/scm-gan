@@ -78,7 +78,7 @@ def main():
 
     for train_iter in range(train_iters):
         theta = (train_iter / train_iters)
-        prediction_horizon = 5 + int(5 * theta)
+        prediction_horizon = 5 + int(7 * theta)
 
         train_mode([encoder, decoder, rgb_decoder, transition, discriminator])
 
@@ -118,7 +118,7 @@ def main():
             reward_difference = torch.mean(torch.mean(torch.abs(expected_reward - actual_reward), dim=1) * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
             print('Expected reward: {}'.format(expected_reward[0].data.cpu().numpy()))
-            loss += .001 * reward_difference
+            loss += .01 * reward_difference
 
             # Reconstruction loss
             expected = states[:, t]
@@ -131,13 +131,11 @@ def main():
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
 
-            '''
             # Apply activation L1 loss
             l1_values = z.abs().mean(-1).mean(-1).mean(-1)
             l1_loss = torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
             loss += .01 * theta * l1_loss
-            '''
 
             # Spatially-Coherent Log-Determinant independence loss
             # Sample 1000 random latent vector spatial points from the batch
@@ -154,16 +152,13 @@ def main():
             # Predict transition
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
-            '''
             # Apply transition L1 loss
             t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
             t_l1_loss = torch.mean(t_l1_values * active_mask)
             ts.collect('T-L1 t={}'.format(t), t_l1_loss)
             loss += .01 * theta * t_l1_loss
-            '''
             z = new_z
 
-        '''
         # Apply TD-RNN loss
         # Predict state t+3 by T(E(s_2), a_2) and also by T(T(E(s_1),a_1),a_2)
         # They should be consistent: long-term expectations should match later short-term expectations
@@ -174,7 +169,6 @@ def main():
         consistency_loss = torch.mean((twostep_prediction - onestep_prediction)**2)
         ts.collect('TDC 2:1', consistency_loss)
         loss += .1 * theta * consistency_loss
-        '''
 
         loss.backward()
 
@@ -380,37 +374,67 @@ def composite_feature_rgb_image(actual_features, actual_rgb, predicted_features,
 def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_pred, train_iter=0, timesteps=60, num_actions=4):
     start_time = time.time()
     print('Starting trajectory simulation for {} frames'.format(timesteps))
-    states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps)
+    states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps, random_start=False)
     states = torch.Tensor(states).cuda()
     rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
-    vid_features = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:, :3])
     z = transition(z, torch.eye(num_actions)[actions[:, 2]].cuda())
     z.detach()
+
+    vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
+
+    # First: replay in simulation the true trajectory
+    simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
+                                    states, rgb_states, rewards, dones, actions, vid, caption)
+
+    # Then, play out a simulation of a counterfactual
+    actions[0, :] = 4
+    actions[0, 4] = 3
+    actions[0, 6] = 1
+    actions[0, 7] = 2
+    simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
+                                    states, rgb_states, rewards, dones, actions, vid, caption)
+
+    vid.finish()
+    print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
+
+
+def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, transition,
+                                     states, rgb_states, rewards, dones, actions, vid,
+                                     timesteps=60, num_actions=5, num_rewards=4, caption=''):
+    estimated_cumulative_reward = np.zeros(4)
+    true_cumulative_reward = np.zeros(4)
+    estimated_rewards = []
     for t in range(3, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
-        estimated_reward = reward_pred(z)
         x_t_pixels = rgb_decoder(x_t)
+        estimated_reward = reward_pred(z)[0]
+        estimated_rewards.append(estimated_reward)
+        estimated_cumulative_reward += estimated_reward.data.cpu().numpy()
+        true_cumulative_reward += rewards[0, t]
 
         # Visualize features and RGB
-        r1, r2, r3, r4 = estimated_reward[0]
+        r1, r2, r3, r4 = estimated_reward
         rt1, rt2, rt3, rt4 = rewards[0, t]
         caption = 'Pred. t+{} a={} R_est={:.2f} {:.2f} {:.2f} {:.2f} R_true = {:.2f} {:.2f} {:.2f} {:.2f} '.format(
             t, actions[:, t], r1, r2, r3, r4, rt1, rt2, rt3, rt4)
         pixels = composite_feature_rgb_image(states[:, t], rgb_states[:, t], x_t, x_t_pixels)
-        vid_features.write_frame(pixels * 255, caption=caption, normalize=False)
+        vid.write_frame(pixels * 255, caption=caption, normalize=False)
 
         # Predict the next latent point
-        #onehot_a = torch.eye(num_actions)[actions[:, t + 1]].cuda()
-        onehot_a = torch.eye(num_actions)[[np.random.randint(5)]].cuda()
+        onehot_a = torch.eye(num_actions)[actions[:, t + 1]].cuda()
         z = transition(z, onehot_a).detach()
 
         if dones[0, t]:
             break
-
-    vid_features.finish()
-    print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
-
+    r1, r2, r3, r4 = estimated_cumulative_reward
+    rt1, rt2, rt3, rt4 = true_cumulative_reward
+    for _ in range(10):
+        caption = 'R_est={:.2f} {:.2f} {:.2f} {:.2f} R_true = {:.2f} {:.2f} {:.2f} {:.2f} '.format(
+            r1, r2, r3, r4, rt1, rt2, rt3, rt4)
+        vid.write_frame(pixels * 255, caption=caption, normalize=False)
+    print('True cumulative reward: {}'.format(true_cumulative_reward))
+    print('Estimated cumulative reward: {}'.format(estimated_cumulative_reward))
 
 if __name__ == '__main__':
     main()
