@@ -222,6 +222,9 @@ def main():
             torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
             torch.save(rgb_decoder.state_dict(), 'model-rgb_decoder.pth')
 
+        if train_iter % 1000 == 0:
+            visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, train_iter=train_iter)
+
 
     print(ts)
     print('Finished')
@@ -320,19 +323,20 @@ def compute_causal_edge_weights(src_z, transition, onehot_a):
     return causal_edge_weights
 
 
-def visualize_reconstruction(datasource, encoder, decoder, transition, train_iter=0):
+def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, train_iter=0):
     # Image of reconstruction
     filename = 'vis_iter_{:06d}.png'.format(train_iter)
     num_actions = datasource.NUM_ACTIONS
     timesteps = 60
     batch_size = 1
-    states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps)
+    states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps, random_start=False)
     states = torch.Tensor(states).cuda()
+    rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
     rewards = torch.Tensor(rewards).cuda()
     actions = torch.LongTensor(actions).cuda()
     for offset in [0, 1, 2, 3, 5, 10]:
         print('Generating video for offset {}'.format(offset))
-        vid = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter))
+        vid = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=5)
         for t in tqdm(range(3, timesteps - 10)):
             #print('encoding frame {}'.format(t))
             z = encoder(states[:, t-3:t])
@@ -340,14 +344,28 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, train_ite
                 onehot_a = torch.eye(num_actions)[actions[:, t + i]].cuda()
                 #print('\t...predicting frame {}'.format(t + i + 1))
                 z = transition(z, onehot_a)
-            predicted = decoder(z)
-            actual = states[:, t + offset]
-            left = imutil.get_pixels(actual[0], normalize=False)
-            right = imutil.get_pixels(predicted[0], normalize=False)
+
+            predicted_features = decoder(z)
+            predicted_rgb = rgb_decoder(predicted_features)
+
+            actual_features = states[:, t + offset]
+            actual_rgb = rgb_states[:, t + offset]
+
+            lbot = imutil.get_pixels(actual_features[0], 384, 512, img_padding=4, normalize=False)
+            rbot = imutil.get_pixels(predicted_features[0], 384, 512, img_padding=4, normalize=False)
+
+            height, width, channels = lbot.shape
+
+            ltop = imutil.get_pixels(actual_rgb[0], width, width, normalize=False)
+            rtop = imutil.get_pixels(predicted_rgb[0], width, width, normalize=False)
+
+            left = np.concatenate([ltop, lbot], axis=0)
+            right = np.concatenate([rtop, rbot], axis=0)
+
             pixels = np.concatenate([left, right], axis=1)
             pixels = np.clip(pixels, 0, 1)
             caption = "Left: True t={} Right: Predicted from t-{}".format(t, offset)
-            vid.write_frame(pixels * 255, normalize=False, img_padding=8, resize_to=(800, 400), caption=caption)
+            vid.write_frame(pixels * 255, normalize=False, img_padding=8, caption=caption)
         vid.finish()
     print('Finished generating forward-prediction videos')
 
