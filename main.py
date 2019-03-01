@@ -188,19 +188,24 @@ def main():
         rgb_loss.backward()
         opt_rgb.step()
 
-        if train_iter % 100 == 0:
+        if train_iter % 1000 == 0:
             print('Evaluating networks...')
             test_mode([encoder, decoder, rgb_decoder, transition, discriminator])
-            # TODO: visualize pysc2 features
-            filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
-            est_reward = reward_predictor(z0)[0].data.cpu().numpy()
+
+            # Run visualizations
+            est_reward = format_reward_vector(reward_predictor(z0)[0])
             caption = 'Left: Input, Right: Generated. iter: {:06d} R: {}'.format(train_iter, est_reward)
             pixels = torch.cat([expected[0], actual[0]], dim=-1)
+            filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
             imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
+
+            visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
+            visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
 
             # Periodically compute expensive metrics
             #if hasattr(datasource, 'simulator'):
             #    disentanglement_score = higgins_metric_conv(datasource.simulator, datasource.TRUE_LATENT_DIM, encoder, latent_dim)
+
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
@@ -209,9 +214,6 @@ def main():
             torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
             torch.save(rgb_decoder.state_dict(), 'model-rgb_decoder.pth')
 
-        if train_iter % 1000 == 0:
-            visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
-            visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
 
 
     print(ts)

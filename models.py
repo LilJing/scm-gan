@@ -126,11 +126,14 @@ class Discriminator(nn.Module):
 
 
 class RewardPredictor(nn.Module):
+    # Predicts multiple reward types, if you have multiple reward signals
     def __init__(self, latent_dim, num_rewards):
         super().__init__()
         self.conv1 = nn.Conv2d(latent_dim, 64, (3,3), stride=1, padding=0)
         self.conv2 = nn.Conv2d(64, 32, (3,3), stride=1, padding=0)
-        self.conv3 = nn.Conv2d(32, num_rewards, (3,3), stride=2, padding=0)
+
+        # Each reward is discretized into a 3-way classification: +1, -1, or 0
+        self.conv3 = nn.Conv2d(32, num_rewards * 3, (3,3), stride=2, padding=0)
         self.cuda()
 
     def forward(self, x):
@@ -139,6 +142,13 @@ class RewardPredictor(nn.Module):
         x = self.conv2(x)
         x = F.leaky_relu(x)
         x = self.conv3(x)
+
+        # Classify each pixel as +1, -1, or 0 (for each reward type)
+        batch_size, channels, height, width = x.shape
+        x = x.view(batch_size, 3, channels // 3, height, width)
+        x = torch.softmax(x, dim=2)
+        # Return the cumulative reward (for each reward type)
+        x = x[:, 0] - x[:, 2]
         return x.sum(-1).sum(-1)
 
 
