@@ -137,4 +137,6 @@ def convert_frame(state, width=64, height=64):
 
 if __name__ == '__main__':
     env = ZerglingDefenseEnvironment()
-    play_game_thread()
+    while True:
+        simulate_to_replay_buffer(1)
+        import pdb; pdb.set_trace()

@@ -223,6 +223,7 @@ def main():
             torch.save(rgb_decoder.state_dict(), 'model-rgb_decoder.pth')
 
         if train_iter % 1000 == 0:
+            visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
             visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, train_iter=train_iter)
 
 
@@ -351,67 +352,63 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
             actual_features = states[:, t + offset]
             actual_rgb = rgb_states[:, t + offset]
 
-            lbot = imutil.get_pixels(actual_features[0], 384, 512, img_padding=4, normalize=False)
-            rbot = imutil.get_pixels(predicted_features[0], 384, 512, img_padding=4, normalize=False)
-
-            height, width, channels = lbot.shape
-
-            ltop = imutil.get_pixels(actual_rgb[0], width, width, normalize=False)
-            rtop = imutil.get_pixels(predicted_rgb[0], width, width, normalize=False)
-
-            left = np.concatenate([ltop, lbot], axis=0)
-            right = np.concatenate([rtop, rbot], axis=0)
-
-            pixels = np.concatenate([left, right], axis=1)
-            pixels = np.clip(pixels, 0, 1)
             caption = "Left: True t={} Right: Predicted from t-{}".format(t, offset)
+            pixels = composite_feature_rgb_image(actual_features, actual_rgb, predicted_features, predicted_rgb)
             vid.write_frame(pixels * 255, normalize=False, img_padding=8, caption=caption)
         vid.finish()
     print('Finished generating forward-prediction videos')
 
 
-def visualize_forward_simulation(datasource, encoder, decoder, transition, reward_pred, train_iter=0, timesteps=60, num_actions=4):
+def composite_feature_rgb_image(actual_features, actual_rgb, predicted_features, predicted_rgb):
+    lbot = imutil.get_pixels(actual_features[0], 384, 512, img_padding=4, normalize=False)
+    rbot = imutil.get_pixels(predicted_features[0], 384, 512, img_padding=4, normalize=False)
+
+    height, width, channels = lbot.shape
+
+    ltop = imutil.get_pixels(actual_rgb[0], width, width, normalize=False)
+    rtop = imutil.get_pixels(predicted_rgb[0], width, width, normalize=False)
+
+    left = np.concatenate([ltop, lbot], axis=0)
+    right = np.concatenate([rtop, rbot], axis=0)
+
+    pixels = np.concatenate([left, right], axis=1)
+    pixels = np.clip(pixels, 0, 1)
+    return pixels
+
+
+
+def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_pred, train_iter=0, timesteps=60, num_actions=4):
     start_time = time.time()
     print('Starting trajectory simulation for {} frames'.format(timesteps))
-    states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps)
+    states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps)
     states = torch.Tensor(states).cuda()
-    vid_simulation = imutil.Video('simulation_only_iter_{:06d}.mp4'.format(train_iter), framerate=3)
+    rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
     vid_features = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
-    vid_separable_conv = imutil.Video('simulation_separable_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     z = encoder(states[:, :3])
     z = transition(z, torch.eye(num_actions)[actions[:, 2]].cuda())
     z.detach()
     for t in range(3, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
         estimated_reward = reward_pred(z)
+        x_t_pixels = rgb_decoder(x_t)
 
-        # Render top row: real video vs. simulation from initial conditions
-        pixel_view = torch.cat((states[:, t], x_t), dim=3)
-        caption = 'Pred. t+{} a={} R est={:.2f} R={} min={:.2f} max={:.2f}'.format(
-            t, actions[:, t], estimated_reward[0], rewards[:, t], pixel_view.min(), pixel_view.max())
-        top_row = imutil.show(pixel_view.clamp_(0,1), caption=caption, img_padding=8, font_size=10,
-                              resize_to=(800,400), return_pixels=True, display=False, save=False)
-        caption = 'Left: Real          Right: Simulated from initial conditions t={}'.format(t)
-        vid_simulation.write_frame(pixel_view.clamp(0, 1), caption=caption, resize_to=(1280,640))
-
-        # Render latent representation of simulation
-        bottom_row = imutil.show(z[0], resize_to=(800,800), return_pixels=True, img_padding=8, display=False, save=False)
-        vid_features.write_frame(np.concatenate([top_row, bottom_row], axis=0))
-
-        # Render pixels generated from latent representation (groupwise separable)
-        separable_output = imutil.show(x_t_separable, resize_to=(800,800), return_pixels=True, img_padding=8, display=False, save=False)
-        vid_separable_conv.write_frame(np.concatenate([top_row, separable_output], axis=0))
+        # Visualize features and RGB
+        r1, r2, r3, r4 = estimated_reward[0]
+        rt1, rt2, rt3, rt4 = rewards[0, t]
+        caption = 'Pred. t+{} a={} R_est={:.2f} {:.2f} {:.2f} {:.2f} R_true = {:.2f} {:.2f} {:.2f} {:.2f} '.format(
+            t, actions[:, t], r1, r2, r3, r4, rt1, rt2, rt3, rt4)
+        pixels = composite_feature_rgb_image(states[:, t], rgb_states[:, t], x_t, x_t_pixels)
+        vid_features.write_frame(pixels * 255, caption=caption, normalize=False)
 
         # Predict the next latent point
-        onehot_a = torch.eye(num_actions)[actions[:, t + 1]].cuda()
+        #onehot_a = torch.eye(num_actions)[actions[:, t + 1]].cuda()
+        onehot_a = torch.eye(num_actions)[[np.random.randint(5)]].cuda()
         z = transition(z, onehot_a).detach()
 
         if dones[0, t]:
             break
 
-    vid_simulation.finish()
     vid_features.finish()
-    vid_separable_conv.finish()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
 
