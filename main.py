@@ -116,8 +116,7 @@ def main():
             expected_reward = reward_predictor(z)
             actual_reward = rewards[:, t]
             reward_difference = torch.mean(torch.mean(torch.abs(expected_reward - actual_reward), dim=1) * active_mask)
-            expected_rewards_fmt = ['{:.2f}'.format(r) for r in expected_reward[0].data.cpu().numpy()]
-            print('Expected reward: {}'.format(' '.join(expected_rewards_fmt)))
+            print('Expected reward: {}'.format(format_reward_vector(expected_reward[0])))
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
             loss += .01 * reward_difference
 
@@ -199,16 +198,9 @@ def main():
             pixels = torch.cat([expected[0], actual[0]], dim=-1)
             imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
 
-            """
-            # Periodically generate visualizations
-            compute_causal_graph(encoder, transition, datasource, iter=train_iter)
-            visualize_reconstruction(datasource, encoder, decoder, transition, train_iter=train_iter)
-            visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
-
             # Periodically compute expensive metrics
-            if hasattr(datasource, 'simulator'):
-                disentanglement_score = higgins_metric_conv(datasource.simulator, datasource.TRUE_LATENT_DIM, encoder, latent_dim)
-            """
+            #if hasattr(datasource, 'simulator'):
+            #    disentanglement_score = higgins_metric_conv(datasource.simulator, datasource.TRUE_LATENT_DIM, encoder, latent_dim)
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
@@ -240,6 +232,10 @@ def train_mode(networks):
         for child in net.children():
             if type(child) == nn.BatchNorm2d or type(child) == nn.BatchNorm1d:
                 child.momentum = 0.1
+
+
+def format_reward_vector(reward):
+    return ' '.join(['{:.2f}'.format(r) for r in reward])
 
 
 def compute_causal_graph(encoder, transition, datasource, iter=0):
@@ -333,7 +329,7 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
     offsets = [1, 3, 5]
     print('Generating videos for offsets {}'.format(offsets))
     for offset in offsets:
-        vid = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=5)
+        vid = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
         for t in tqdm(range(3, timesteps - max(offsets))):
             # Encode frames t-2, t-1, t to produce state at t-1
             # Then step forward once to produce state at t
@@ -354,7 +350,7 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
             actual_features = states[:, t + offset]
             actual_rgb = rgb_states[:, t + offset]
 
-            caption = "Left: True t={} Right: Predicted from t-{}".format(t, offset)
+            caption = "Left: True t={} Right: Predicted t+{}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
             pixels = composite_feature_rgb_image(actual_features, actual_rgb, predicted_features, predicted_rgb)
             vid.write_frame(pixels * 255, normalize=False, img_padding=8, caption=caption)
         vid.finish()
@@ -400,10 +396,10 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
                                     caption_tag=caption)
 
     # Then, play out a simulation of a counterfactual
-    actions[0, :] = 4
-    actions[0, 4] = 3
-    actions[0, 6] = 1
-    actions[0, 7] = 2
+    actions[0, :] = 4  # no-op
+    actions[0, 4] = 3  # force field right
+    actions[0, 6] = 1  # psi storm right
+    actions[0, 7] = 2  # force field left
     caption = 'Cft.'
     simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
                                     states, rgb_states, rewards, dones, actions, vid,
@@ -428,10 +424,8 @@ def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, trans
         true_cumulative_reward += rewards[0, t]
 
         # Visualize features and RGB
-        r1, r2, r3, r4 = estimated_reward
-        rt1, rt2, rt3, rt4 = rewards[0, t]
-        caption = '{} t+{} a={} R_est={:.2f} {:.2f} {:.2f} {:.2f} R_true = {:.2f} {:.2f} {:.2f} {:.2f} '.format(
-            caption_tag, t, actions[:, t], r1, r2, r3, r4, rt1, rt2, rt3, rt4)
+        caption = '{} t+{} a={} R_est={} R_true = {} '.format(caption_tag, t, actions[:, t],
+            format_reward_vector(estimated_reward), format_reward_vector(rewards[0, t]))
         pixels = composite_feature_rgb_image(states[:, t], rgb_states[:, t], x_t, x_t_pixels)
         vid.write_frame(pixels * 255, caption=caption, normalize=False)
 
@@ -441,11 +435,10 @@ def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, trans
 
         if dones[0, t]:
             break
-    r1, r2, r3, r4 = estimated_cumulative_reward
-    rt1, rt2, rt3, rt4 = true_cumulative_reward
     for _ in range(10):
-        caption = 'R_est={:.2f} {:.2f} {:.2f} {:.2f} R_true = {:.2f} {:.2f} {:.2f} {:.2f} '.format(
-            r1, r2, r3, r4, rt1, rt2, rt3, rt4)
+        caption = 'R_est={} R_true = {} '.format(
+            format_reward_vector(estimated_cumulative_reward),
+            format_reward_vector(true_cumulative_reward))
         vid.write_frame(pixels * 255, caption=caption, normalize=False)
     print('True cumulative reward: {}'.format(true_cumulative_reward))
     print('Estimated cumulative reward: {}'.format(estimated_cumulative_reward))
