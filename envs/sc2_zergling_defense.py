@@ -14,7 +14,6 @@ REPLAY_BUFFER_LEN = 100
 MIN_REPLAY_BUFFER_LEN = 4
 MAX_TRAJECTORY_LEN = 20
 MAX_EPISODES_PER_ENVIRONMENT = 500
-BURN_STATES_BEFORE_START = 0
 NUM_ACTIONS = 5
 NUM_REWARDS = 4
 NO_OP_ACTION = 4
@@ -60,8 +59,6 @@ def simulate_to_replay_buffer(batch_size):
 def play_episode(env, policy):
     states, rgb_states, rewards, actions = [], [], [], []
     state = env.reset()
-    for _ in range(BURN_STATES_BEFORE_START):
-        state, _, _, _ = env.step(action=0)
     reward = np.zeros(NUM_REWARDS)
     done = False
     while True:
