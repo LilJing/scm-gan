@@ -116,8 +116,9 @@ def main():
             expected_reward = reward_predictor(z)
             actual_reward = rewards[:, t]
             reward_difference = torch.mean(torch.mean(torch.abs(expected_reward - actual_reward), dim=1) * active_mask)
+            expected_rewards_fmt = ['{:.2f}'.format(r) for r in expected_reward[0].data.cpu().numpy()]
+            print('Expected reward: {}'.format(' '.join(expected_rewards_fmt)))
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            print('Expected reward: {}'.format(expected_reward[0].data.cpu().numpy()))
             loss += .01 * reward_difference
 
             # Reconstruction loss
@@ -218,7 +219,7 @@ def main():
 
         if train_iter % 1000 == 0:
             visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
-            visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, train_iter=train_iter)
+            visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
 
 
     print(ts)
@@ -318,7 +319,7 @@ def compute_causal_edge_weights(src_z, transition, onehot_a):
     return causal_edge_weights
 
 
-def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, train_iter=0):
+def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=0):
     # Image of reconstruction
     filename = 'vis_iter_{:06d}.png'.format(train_iter)
     num_actions = datasource.NUM_ACTIONS
@@ -329,20 +330,27 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
     rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
     rewards = torch.Tensor(rewards).cuda()
     actions = torch.LongTensor(actions).cuda()
-    for offset in [0, 1, 2, 3, 5, 10]:
-        print('Generating video for offset {}'.format(offset))
+    offsets = [1, 3, 5]
+    print('Generating videos for offsets {}'.format(offsets))
+    for offset in offsets:
         vid = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=5)
-        for t in tqdm(range(3, timesteps - 10)):
-            #print('encoding frame {}'.format(t))
-            z = encoder(states[:, t-3:t])
-            for i in range(offset):
-                onehot_a = torch.eye(num_actions)[actions[:, t + i]].cuda()
-                #print('\t...predicting frame {}'.format(t + i + 1))
+        for t in tqdm(range(3, timesteps - max(offsets))):
+            # Encode frames t-2, t-1, t to produce state at t-1
+            # Then step forward once to produce state at t
+            z = encoder(states[:, t-2:t+1])
+            z = transition(z, torch.eye(num_actions)[actions[:, t - 1]].cuda())
+
+            # Now step forward *offset* times to produce state at t+offset
+            for t_i in range(t, t + offset):
+                onehot_a = torch.eye(num_actions)[actions[:, t_i]].cuda()
                 z = transition(z, onehot_a)
 
+            # Our prediction of the world from 'offset' steps back
             predicted_features = decoder(z)
             predicted_rgb = rgb_decoder(predicted_features)
+            predicted_reward = reward_predictor(z)
 
+            # The ground truth
             actual_features = states[:, t + offset]
             actual_rgb = rgb_states[:, t + offset]
 
@@ -377,23 +385,29 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
     states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps, random_start=False)
     states = torch.Tensor(states).cuda()
     rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
+    # We begin *at* state t=2, then we simulate from t=2 until t=timesteps
+    # Encoder input is t=0, t=1, t=2 to produce t=1
     z = encoder(states[:, :3])
-    z = transition(z, torch.eye(num_actions)[actions[:, 2]].cuda())
+    z = transition(z, torch.eye(num_actions)[actions[:, 1]].cuda())
     z.detach()
 
     vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
 
     # First: replay in simulation the true trajectory
+    caption = 'Real'
     simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
-                                    states, rgb_states, rewards, dones, actions, vid, caption)
+                                    states, rgb_states, rewards, dones, actions, vid,
+                                    caption_tag=caption)
 
     # Then, play out a simulation of a counterfactual
     actions[0, :] = 4
     actions[0, 4] = 3
     actions[0, 6] = 1
     actions[0, 7] = 2
+    caption = 'Cft.'
     simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
-                                    states, rgb_states, rewards, dones, actions, vid, caption)
+                                    states, rgb_states, rewards, dones, actions, vid,
+                                    caption_tag=caption)
 
     vid.finish()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
@@ -401,11 +415,11 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
 
 def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, transition,
                                      states, rgb_states, rewards, dones, actions, vid,
-                                     timesteps=60, num_actions=5, num_rewards=4, caption=''):
+                                     timesteps=60, caption_tag='', num_actions=5, num_rewards=4):
     estimated_cumulative_reward = np.zeros(4)
     true_cumulative_reward = np.zeros(4)
     estimated_rewards = []
-    for t in range(3, timesteps - 1):
+    for t in range(2, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
         x_t_pixels = rgb_decoder(x_t)
         estimated_reward = reward_pred(z)[0]
@@ -416,13 +430,13 @@ def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, trans
         # Visualize features and RGB
         r1, r2, r3, r4 = estimated_reward
         rt1, rt2, rt3, rt4 = rewards[0, t]
-        caption = 'Pred. t+{} a={} R_est={:.2f} {:.2f} {:.2f} {:.2f} R_true = {:.2f} {:.2f} {:.2f} {:.2f} '.format(
-            t, actions[:, t], r1, r2, r3, r4, rt1, rt2, rt3, rt4)
+        caption = '{} t+{} a={} R_est={:.2f} {:.2f} {:.2f} {:.2f} R_true = {:.2f} {:.2f} {:.2f} {:.2f} '.format(
+            caption_tag, t, actions[:, t], r1, r2, r3, r4, rt1, rt2, rt3, rt4)
         pixels = composite_feature_rgb_image(states[:, t], rgb_states[:, t], x_t, x_t_pixels)
         vid.write_frame(pixels * 255, caption=caption, normalize=False)
 
         # Predict the next latent point
-        onehot_a = torch.eye(num_actions)[actions[:, t + 1]].cuda()
+        onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
         z = transition(z, onehot_a).detach()
 
         if dones[0, t]:
@@ -435,6 +449,7 @@ def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, trans
         vid.write_frame(pixels * 255, caption=caption, normalize=False)
     print('True cumulative reward: {}'.format(true_cumulative_reward))
     print('Estimated cumulative reward: {}'.format(estimated_cumulative_reward))
+
 
 if __name__ == '__main__':
     main()
