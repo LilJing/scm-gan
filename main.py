@@ -399,9 +399,10 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
 
     # Then, play out a simulation of a counterfactual
     actions[0, :] = 4  # no-op
+    actions[0, 3] = 2  # force field left
     actions[0, 4] = 3  # force field right
+    actions[0, 5] = 0  # psi storm left
     actions[0, 6] = 1  # psi storm right
-    actions[0, 7] = 2  # force field left
     caption = 'Cft.'
     simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
                                     states, rgb_states, rewards, dones, actions, vid,
