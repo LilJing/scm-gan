@@ -146,7 +146,7 @@ class RewardPredictor(nn.Module):
         # Classify each pixel as +1, -1, or 0 (for each reward type)
         batch_size, channels, height, width = x.shape
         x = x.view(batch_size, 3, channels // 3, height, width)
-        x = torch.softmax(x, dim=2)
+        x = torch.softmax(x, dim=1)
         # Return the cumulative reward (for each reward type)
         x = x[:, 0] - x[:, 2]
         if visualize:
