@@ -136,7 +136,7 @@ class RewardPredictor(nn.Module):
         self.conv3 = nn.Conv2d(32, num_rewards * 3, (3,3), stride=2, padding=0)
         self.cuda()
 
-    def forward(self, x):
+    def forward(self, x, visualize=False):
         x = self.conv1(x)
         x = F.leaky_relu(x)
         x = self.conv2(x)
@@ -149,6 +149,8 @@ class RewardPredictor(nn.Module):
         x = torch.softmax(x, dim=2)
         # Return the cumulative reward (for each reward type)
         x = x[:, 0] - x[:, 2]
+        if visualize:
+            return x.sum(-1).sum(-1), x
         return x.sum(-1).sum(-1)
 
 

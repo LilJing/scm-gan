@@ -332,6 +332,7 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
     print('Generating videos for offsets {}'.format(offsets))
     for offset in offsets:
         vid = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
+        vid_reward = imutil.Video('reward_prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
         for t in tqdm(range(3, timesteps - max(offsets))):
             # Encode frames t-2, t-1, t to produce state at t-1
             # Then step forward once to produce state at t
@@ -346,7 +347,7 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
             # Our prediction of the world from 'offset' steps back
             predicted_features = decoder(z)
             predicted_rgb = rgb_decoder(predicted_features)
-            predicted_reward = reward_predictor(z)
+            predicted_reward, reward_map = reward_predictor(z, visualize=True)
 
             # The ground truth
             actual_features = states[:, t + offset]
@@ -355,7 +356,11 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
             caption = "Left: True t={} Right: Predicted t+{}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
             pixels = composite_feature_rgb_image(actual_features, actual_rgb, predicted_features, predicted_rgb)
             vid.write_frame(pixels * 255, normalize=False, img_padding=8, caption=caption)
+            # Reward ranges from -1 to +1 per pixel
+            caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
+            vid_reward.write_frame((reward_map * 128) + 128, normalize=False, img_padding=8, caption=caption)
         vid.finish()
+        vid_reward.finish()
     print('Finished generating forward-prediction videos')
 
 
