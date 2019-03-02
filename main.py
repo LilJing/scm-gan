@@ -358,7 +358,7 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
             vid.write_frame(pixels * 255, normalize=False, img_padding=8, caption=caption)
             # Reward ranges from -1 to +1 per pixel
             caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
-            vid_reward.write_frame((reward_map * 128) + 128, normalize=False, img_padding=8, caption=caption)
+            vid_reward.write_frame((reward_map[0] * 128) + 128, normalize=False, img_padding=8, resize_to=(512,512), caption=caption)
         vid.finish()
         vid_reward.finish()
     print('Finished generating forward-prediction videos')
