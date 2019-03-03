@@ -88,7 +88,7 @@ def main():
             #filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
             #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
 
-            visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
+            visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_actions=num_actions, num_factors=latent_dim)
             visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
 
             # Periodically compute expensive metrics
@@ -399,7 +399,7 @@ def composite_rgb_reward_factor_image(x_t_pixels, reward_map, z, num_rewards=4):
     return composite_visual
 
 
-def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_pred, train_iter=0, timesteps=60, num_actions=4):
+def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_pred, train_iter=0, timesteps=60, num_actions=4, num_factors=16):
     start_time = time.time()
     print('Starting trajectory simulation for {} frames'.format(timesteps))
     states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps, random_start=False)
@@ -413,12 +413,15 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
 
     rgb_vid = imutil.Video('simulation_rgb_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     ftr_vid = imutil.Video('simulation_ftr_iter_{:06d}.mp4'.format(train_iter), framerate=3)
+    factor_vids = []
+    for i in range(num_factors):
+        factor_vids.append(imutil.Video('separable_factor_{:03d}.mp4'.format(i), framerate=3))
 
     # First: replay in simulation the true trajectory
     caption = 'Real'
     simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
                                     states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid,
-                                    caption_tag=caption)
+                                    factor_vids, caption_tag=caption)
 
     # Then, play out a simulation of a counterfactual
     actions[0, :] = 4  # no-op
@@ -429,15 +432,17 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
     caption = 'Cft.'
     simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
                                     states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid,
-                                    caption_tag=caption)
-
+                                    factor_vids, caption_tag=caption)
+    for vid in factor_vids:
+        vid.finish()
     rgb_vid.finish()
+    ftr_vid.finish()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
 
 
 def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, transition,
-                                     states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid,
+                                     states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid, factor_vids,
                                      timesteps=60, caption_tag='', num_actions=5, num_rewards=4):
     estimated_cumulative_reward = np.zeros(4)
     true_cumulative_reward = np.zeros(4)
@@ -459,6 +464,12 @@ def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, trans
         # Visualize factors and reward mask
         ftr_pixels = composite_rgb_reward_factor_image(x_t_pixels, reward_map, z)
         ftr_vid.write_frame(ftr_pixels, caption=caption, normalize=False)
+
+        # Visualize each separate factor
+        num_factors, num_features, height, width = x_t_separable.shape
+        for z_i in range(num_factors):
+            factor_vis = rgb_decoder(x_t_separable[z_i].unsqueeze(0), enable_bg=False)
+            factor_vids[z_i].write_frame(factor_vis * 255, normalize=False)
 
         # Predict the next latent point
         onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()

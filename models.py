@@ -183,7 +183,8 @@ class Decoder(nn.Module):
         # Optional: Learn to subtract static background, separate from objects
         #x = x + self.bg
         if visualize:
-            visualization = imutil.show(x[0], img_padding=8, save=False, display=False, return_pixels=True)
+            visualization = x[0]
+            #imutil.show(x[0], img_padding=8, save=False, display=False, return_pixels=True)
         x = torch.sum(x, dim=1)
         if visualize:
             return x, visualization
@@ -198,11 +199,12 @@ class RGBDecoder(nn.Module):
         self.bg = nn.Parameter(torch.zeros((3, img_size, img_size)).cuda())
         self.cuda()
 
-    def forward(self, x):
+    def forward(self, x, enable_bg=True):
         x = self.conv1(x)
         x = F.leaky_relu(x)
         x = self.conv2(x)
-        x = x + self.bg
+        if enable_bg:
+            x = x + self.bg
         x = torch.sigmoid(x)
         return x
 
