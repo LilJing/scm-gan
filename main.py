@@ -116,7 +116,6 @@ def main():
             expected_reward = reward_predictor(z)
             actual_reward = rewards[:, t]
             reward_difference = torch.mean(torch.mean(torch.abs(expected_reward - actual_reward), dim=1) * active_mask)
-            print('Expected reward: {}'.format(format_reward_vector(expected_reward[0])))
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
             loss += .01 * reward_difference
 

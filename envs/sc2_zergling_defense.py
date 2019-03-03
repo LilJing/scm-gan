@@ -23,15 +23,17 @@ initialized = False
 simulation_iters = 0
 env = None
 policy = None
+sim_thread = None
 
 
 def init():
     global env
     global initialized
+    global sim_thread
     env = ZerglingDefenseEnvironment()
-    thread = Thread(target=play_game_thread)
-    thread.daemon = True  # hack to kill on ctrl+C
-    thread.start()
+    sim_thread = Thread(target=play_game_thread)
+    sim_thread.daemon = True  # hack to kill on ctrl+C
+    sim_thread.start()
     initialized = True
 
 
@@ -57,7 +59,7 @@ def simulate_to_replay_buffer(batch_size):
         simulation_iters += 1
         if simulation_iters % 100 == 1:
             print('\nSimulator thread has simulated {} trajectories. Replay buffer size is {}'.format(
-                iters, len(replay_buffer)))
+                simulation_iters, len(replay_buffer)))
 
 
 def play_episode(env, policy):
@@ -93,6 +95,10 @@ def add_to_replay_buffer(episode):
 def get_trajectories(batch_size=8, timesteps=10, random_start=True):
     if not initialized:
         init()
+
+    if not sim_thread.is_alive():
+        print('Error: Simulator thread has died!')
+        raise Exception('Simulator thread crashed')
 
     # Run the game and add new episodes into the replay buffer
     while len(replay_buffer) < MIN_REPLAY_BUFFER_LEN:
