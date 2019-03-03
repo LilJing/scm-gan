@@ -39,6 +39,7 @@ def play_game_thread():
     while True:
         simulate_to_replay_buffer(1)
 
+
 def default_policy(*args, **kwargs):
     if np.random.random() < 0.9:
         return NO_OP_ACTION
@@ -54,6 +55,9 @@ def simulate_to_replay_buffer(batch_size):
     for _ in range(batch_size):
         play_episode(env, policy)
         simulation_iters += 1
+        if simulation_iters % 100 == 1:
+            print('\nSimulator thread has simulated {} trajectories. Replay buffer size is {}'.format(
+                iters, len(replay_buffer)))
 
 
 def play_episode(env, policy):

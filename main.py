@@ -193,11 +193,11 @@ def main():
             test_mode([encoder, decoder, rgb_decoder, transition, discriminator])
 
             # Run visualizations
-            est_reward = format_reward_vector(reward_predictor(z0)[0])
-            caption = 'Left: Input, Right: Generated. iter: {:06d} R: {}'.format(train_iter, est_reward)
-            pixels = torch.cat([expected[0], actual[0]], dim=-1)
-            filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
-            imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
+            #est_reward = format_reward_vector(reward_predictor(z0)[0])
+            #caption = 'Left: Input, Right: Generated. iter: {:06d} R: {}'.format(train_iter, est_reward)
+            #pixels = torch.cat([expected[0], actual[0]], dim=-1)
+            #filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
+            #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
 
             visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
             visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
@@ -355,10 +355,11 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
 
             caption = "Left: True t={} Right: Predicted t+{}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
             pixels = composite_feature_rgb_image(actual_features, actual_rgb, predicted_features, predicted_rgb)
-            vid.write_frame(pixels * 255, normalize=False, img_padding=8, caption=caption)
-            # Reward ranges from -1 to +1 per pixel
+            vid.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
+
             caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
-            vid_reward.write_frame((reward_map[0] * 128) + 128, normalize=False, img_padding=8, resize_to=(512,512), caption=caption)
+            reward_pixels = composite_rgb_reward_factor_image(predicted_rgb, reward_map, z)
+            vid_reward.write_frame(reward_pixels, normalize=False, caption=caption)
         vid.finish()
         vid_reward.finish()
     print('Finished generating forward-prediction videos')
@@ -378,8 +379,25 @@ def composite_feature_rgb_image(actual_features, actual_rgb, predicted_features,
 
     pixels = np.concatenate([left, right], axis=1)
     pixels = np.clip(pixels, 0, 1)
-    return pixels
+    return pixels * 255
 
+
+def composite_rgb_reward_factor_image(x_t_pixels, reward_map, z, num_rewards=4):
+
+    simulated_rgb = imutil.get_pixels(x_t_pixels * 255, 512, 512, normalize=False)
+
+    reward_positive = reward_map[0] * (reward_map[0] > 0).type(torch.cuda.FloatTensor)
+    reward_negative = -reward_map[0] * (reward_map[0] < 0).type(torch.cuda.FloatTensor)
+    red_map = imutil.get_pixels(reward_negative.sum(dim=0) * 255, 512, 512, normalize=False)
+    red_map[:, :, 1:] = 0
+    blue_map = imutil.get_pixels(reward_positive.sum(dim=0) * 255, 512, 512, normalize=False)
+    blue_map[:, :, :2] = 0
+
+    reward_overlay_simulation = np.clip(simulated_rgb + red_map + blue_map, 0, 255)
+
+    feature_maps = imutil.get_pixels(z[0], 512, 512, img_padding=4) * 255
+    composite_visual = np.concatenate([reward_overlay_simulation, feature_maps], axis=1)
+    return composite_visual
 
 
 def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_pred, train_iter=0, timesteps=60, num_actions=4):
@@ -394,12 +412,13 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
     z = transition(z, torch.eye(num_actions)[actions[:, 1]].cuda())
     z.detach()
 
-    vid = imutil.Video('simulation_iter_{:06d}.mp4'.format(train_iter), framerate=3)
+    rgb_vid = imutil.Video('simulation_rgb_iter_{:06d}.mp4'.format(train_iter), framerate=3)
+    ftr_vid = imutil.Video('simulation_ftr_iter_{:06d}.mp4'.format(train_iter), framerate=3)
 
     # First: replay in simulation the true trajectory
     caption = 'Real'
     simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
-                                    states, rgb_states, rewards, dones, actions, vid,
+                                    states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid,
                                     caption_tag=caption)
 
     # Then, play out a simulation of a counterfactual
@@ -410,15 +429,16 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
     actions[0, 6] = 1  # psi storm right
     caption = 'Cft.'
     simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
-                                    states, rgb_states, rewards, dones, actions, vid,
+                                    states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid,
                                     caption_tag=caption)
 
-    vid.finish()
+    rgb_vid.finish()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
 
+
 def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, transition,
-                                     states, rgb_states, rewards, dones, actions, vid,
+                                     states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid,
                                      timesteps=60, caption_tag='', num_actions=5, num_rewards=4):
     estimated_cumulative_reward = np.zeros(4)
     true_cumulative_reward = np.zeros(4)
@@ -426,16 +446,20 @@ def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, trans
     for t in range(2, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
         x_t_pixels = rgb_decoder(x_t)
-        estimated_reward = reward_pred(z)[0]
-        estimated_rewards.append(estimated_reward)
-        estimated_cumulative_reward += estimated_reward.data.cpu().numpy()
+        estimated_reward, reward_map = reward_pred(z, visualize=True)
+        estimated_rewards.append(estimated_reward[0])
+        estimated_cumulative_reward += estimated_reward[0].data.cpu().numpy()
         true_cumulative_reward += rewards[0, t]
 
         # Visualize features and RGB
         caption = '{} t+{} a={} R_est={} R_true = {} '.format(caption_tag, t, actions[:, t],
-            format_reward_vector(estimated_reward), format_reward_vector(rewards[0, t]))
-        pixels = composite_feature_rgb_image(states[:, t], rgb_states[:, t], x_t, x_t_pixels)
-        vid.write_frame(pixels * 255, caption=caption, normalize=False)
+            format_reward_vector(estimated_reward[0]), format_reward_vector(rewards[0, t]))
+        rgb_pixels = composite_feature_rgb_image(states[:, t], rgb_states[:, t], x_t, x_t_pixels)
+        rgb_vid.write_frame(rgb_pixels, caption=caption, normalize=False)
+
+        # Visualize factors and reward mask
+        ftr_pixels = composite_rgb_reward_factor_image(x_t_pixels, reward_map, z)
+        ftr_vid.write_frame(ftr_pixels, caption=caption, normalize=False)
 
         # Predict the next latent point
         onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
@@ -447,9 +471,10 @@ def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, trans
         caption = 'R_est={} R_true = {} '.format(
             format_reward_vector(estimated_cumulative_reward),
             format_reward_vector(true_cumulative_reward))
-        vid.write_frame(pixels * 255, caption=caption, normalize=False)
-    print('True cumulative reward: {}'.format(true_cumulative_reward))
-    print('Estimated cumulative reward: {}'.format(estimated_cumulative_reward))
+        rgb_vid.write_frame(rgb_pixels, caption=caption, normalize=False)
+        ftr_vid.write_frame(ftr_pixels, caption=caption, normalize=False)
+    print('True cumulative reward: {}'.format(format_reward_vector(true_cumulative_reward)))
+    print('Estimated cumulative reward: {}'.format(format_reward_vector(estimated_cumulative_reward)))
 
 
 if __name__ == '__main__':
