@@ -38,8 +38,15 @@ def init():
 
 
 def play_game_thread():
+    global env
     while True:
         simulate_to_replay_buffer(1)
+        if simulation_iters % 100 == 1:
+            print('\nSimulator thread has simulated {} trajectories. Replay buffer size is {}'.format(
+                simulation_iters, len(replay_buffer)))
+        if simulation_iters > 0 and simulation_iters % MAX_EPISODES_PER_ENVIRONMENT == 0:
+            del env
+            init()
 
 
 def default_policy(*args, **kwargs):
@@ -57,9 +64,6 @@ def simulate_to_replay_buffer(batch_size):
     for _ in range(batch_size):
         play_episode(env, policy)
         simulation_iters += 1
-        if simulation_iters % 100 == 1:
-            print('\nSimulator thread has simulated {} trajectories. Replay buffer size is {}'.format(
-                simulation_iters, len(replay_buffer)))
 
 
 def play_episode(env, policy):

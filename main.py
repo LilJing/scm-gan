@@ -77,8 +77,34 @@ def main():
     blur = models.GaussianSmoothing(channels=1, kernel_size=5, sigma=3)
 
     for train_iter in range(train_iters):
-        theta = (train_iter / train_iters)
-        prediction_horizon = 5 + int(7 * theta)
+        if train_iter % 1000 == 0:
+            print('Evaluating networks...')
+            test_mode([encoder, decoder, rgb_decoder, transition, discriminator])
+
+            # Run visualizations
+            #est_reward = format_reward_vector(reward_predictor(z0)[0])
+            #caption = 'Left: Input, Right: Generated. iter: {:06d} R: {}'.format(train_iter, est_reward)
+            #pixels = torch.cat([expected[0], actual[0]], dim=-1)
+            #filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
+            #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
+
+            visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
+            visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
+
+            # Periodically compute expensive metrics
+            #if hasattr(datasource, 'simulator'):
+            #    disentanglement_score = higgins_metric_conv(datasource.simulator, datasource.TRUE_LATENT_DIM, encoder, latent_dim)
+
+            print('Saving networks to filesystem...')
+            torch.save(transition.state_dict(), 'model-transition.pth')
+            torch.save(encoder.state_dict(), 'model-encoder.pth')
+            torch.save(decoder.state_dict(), 'model-decoder.pth')
+            torch.save(discriminator.state_dict(), 'model-discriminator.pth')
+            torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
+            torch.save(rgb_decoder.state_dict(), 'model-rgb_decoder.pth')
+
+        theta = 3 * (train_iter / train_iters)
+        prediction_horizon = 5 + int(1 * theta)
 
         train_mode([encoder, decoder, rgb_decoder, transition, discriminator])
 
@@ -134,7 +160,7 @@ def main():
             l1_values = z.abs().mean(-1).mean(-1).mean(-1)
             l1_loss = torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
-            loss += .01 * theta * l1_loss
+            loss += .001 * theta * l1_loss
 
             # Spatially-Coherent Log-Determinant independence loss
             # Sample 1000 random latent vector spatial points from the batch
@@ -186,32 +212,6 @@ def main():
         ts.collect('RGB loss', rgb_loss)
         rgb_loss.backward()
         opt_rgb.step()
-
-        if train_iter % 1000 == 0:
-            print('Evaluating networks...')
-            test_mode([encoder, decoder, rgb_decoder, transition, discriminator])
-
-            # Run visualizations
-            #est_reward = format_reward_vector(reward_predictor(z0)[0])
-            #caption = 'Left: Input, Right: Generated. iter: {:06d} R: {}'.format(train_iter, est_reward)
-            #pixels = torch.cat([expected[0], actual[0]], dim=-1)
-            #filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
-            #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
-
-            visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_actions=num_actions)
-            visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
-
-            # Periodically compute expensive metrics
-            #if hasattr(datasource, 'simulator'):
-            #    disentanglement_score = higgins_metric_conv(datasource.simulator, datasource.TRUE_LATENT_DIM, encoder, latent_dim)
-
-            print('Saving networks to filesystem...')
-            torch.save(transition.state_dict(), 'model-transition.pth')
-            torch.save(encoder.state_dict(), 'model-encoder.pth')
-            torch.save(decoder.state_dict(), 'model-decoder.pth')
-            torch.save(discriminator.state_dict(), 'model-discriminator.pth')
-            torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
-            torch.save(rgb_decoder.state_dict(), 'model-rgb_decoder.pth')
 
 
 
