@@ -203,17 +203,31 @@ def main():
         opt_pred.step()
         ts.print_every(2)
 
-        ##### Separately, train an RGB-decoder
-        ##### This converts from features to pixels
+        # For StarCraftII we use a two-stage decoder
+        # The dynamics and planning model operates entirely in pysc2 feature space
+        # At the end, we append a GAN to convert features to human-visible RGB
+        # Train generator
         opt_rgb.zero_grad()
-        expected = rgb_states[:, 2]
-        actual = rgb_decoder(decoder(z0).detach())
-        rgb_loss = torch.mean((expected - actual)**2)
+        real_rgb = rgb_states[:, 2]
+        simulated_features = decoder(z0).detach()
+        simulated_rgb = rgb_decoder(simulated_features)
+        rgb_loss = torch.mean((real_rgb - simulated_rgb)**2)
         ts.collect('RGB loss', rgb_loss)
-        rgb_loss.backward()
+
+        gen_loss = .001 * F.relu(1 - discriminator(simulated_rgb)).mean()
+        ts.collect('RGB gen loss', gen_loss)
+
+        loss = gen_loss + rgb_loss
+        loss.backward()
         opt_rgb.step()
 
-
+        # Train discriminator
+        opt_disc.zero_grad()
+        disc_loss = .01 * F.relu(1 + discriminator(rgb_decoder(simulated_features))).mean()
+        disc_loss += .01 * F.relu(1 - discriminator(real_rgb)).mean()
+        ts.collect('RGB disc loss', disc_loss)
+        disc_loss.backward()
+        opt_disc.step()
 
     print(ts)
     print('Finished')
