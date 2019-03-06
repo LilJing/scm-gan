@@ -344,9 +344,10 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
     offsets = [1, 3, 5]
     print('Generating videos for offsets {}'.format(offsets))
     for offset in offsets:
-        vid = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
+        vid_rgb = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
         vid_reward = imutil.Video('reward_prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
-        for t in tqdm(range(3, timesteps - max(offsets))):
+        vid_aleatoric = imutil.Video('anomaly_detection_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
+        for t in tqdm(range(3, timesteps - offset)):
             # Encode frames t-2, t-1, t to produce state at t-1
             # Then step forward once to produce state at t
             z = encoder(states[:, t-2:t+1])
@@ -366,15 +367,24 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
             actual_features = states[:, t + offset]
             actual_rgb = rgb_states[:, t + offset]
 
+            # Difference between actual and predicted outcomes is "surprise"
+            surprise_map = torch.clamp((actual_features - predicted_features) ** 2, 0, 1)
+
+            caption = "t={} surprise (aleatoric): {:.03f}".format(t, surprise_map.sum())
+            pixels = composite_aleatoric_surprise_image(actual_rgb, surprise_map, z)
+            vid_aleatoric.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
+
             caption = "Left: True t={} Right: Predicted t+{}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
             pixels = composite_feature_rgb_image(actual_features, actual_rgb, predicted_features, predicted_rgb)
-            vid.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
+            vid_rgb.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
 
             caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
             reward_pixels = composite_rgb_reward_factor_image(predicted_rgb, reward_map, z)
             vid_reward.write_frame(reward_pixels, normalize=False, caption=caption)
-        vid.finish()
+
+        vid_rgb.finish()
         vid_reward.finish()
+        vid_aleatoric.finish()
     print('Finished generating forward-prediction videos')
 
 
@@ -407,6 +417,23 @@ def composite_rgb_reward_factor_image(x_t_pixels, reward_map, z, num_rewards=4):
     blue_map[:, :, :2] = 0
 
     reward_overlay_simulation = np.clip(simulated_rgb + red_map + blue_map, 0, 255)
+
+    feature_maps = imutil.get_pixels(z[0], 512, 512, img_padding=4) * 255
+    composite_visual = np.concatenate([reward_overlay_simulation, feature_maps], axis=1)
+    return composite_visual
+
+
+def composite_aleatoric_surprise_image(x_t_pixels, surprise_map, z, num_factors = 16):
+    simulated_rgb = imutil.get_pixels(x_t_pixels * 255, 512, 512, normalize=False)
+    # Green for aleatoric surprise
+    surprise = surprise_map[0].sum(0) / num_factors
+    green_map = imutil.get_pixels(surprise * 255, 512, 512, normalize=False)
+    green_map[:, :, 0] = 0
+    green_map[:, :, 2] = 0
+    #blue_map = imutil.get_pixels(reward_positive.sum(dim=0) * 255, 512, 512, normalize=False)
+    #blue_map[:, :, :2] = 0
+
+    reward_overlay_simulation = np.clip(simulated_rgb + green_map, 0, 255)
 
     feature_maps = imutil.get_pixels(z[0], 512, 512, img_padding=4) * 255
     composite_visual = np.concatenate([reward_overlay_simulation, feature_maps], axis=1)
