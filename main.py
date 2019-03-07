@@ -103,8 +103,8 @@ def main():
             torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
             torch.save(rgb_decoder.state_dict(), 'model-rgb_decoder.pth')
 
-        theta = 3 * (train_iter / train_iters)
-        prediction_horizon = 5 + int(1 * theta)
+        theta = (train_iter / train_iters)
+        prediction_horizon = 5 + int(5 * theta)
 
         train_mode([encoder, decoder, rgb_decoder, transition, discriminator])
 
@@ -160,7 +160,7 @@ def main():
             l1_values = z.abs().mean(-1).mean(-1).mean(-1)
             l1_loss = torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
-            loss += .001 * theta * l1_loss
+            loss += .01 * theta * l1_loss
 
             # Spatially-Coherent Log-Determinant independence loss
             # Sample 1000 random latent vector spatial points from the batch
@@ -214,20 +214,21 @@ def main():
         rgb_loss = torch.mean((real_rgb - simulated_rgb)**2)
         ts.collect('RGB loss', rgb_loss)
 
-        gen_loss = .001 * F.relu(1 - discriminator(simulated_rgb)).mean()
-        ts.collect('RGB gen loss', gen_loss)
+        #gen_loss = .001 * F.relu(1 - discriminator(simulated_rgb)).mean()
+        #ts.collect('RGB gen loss', gen_loss)
 
-        loss = gen_loss + rgb_loss
+        #loss = gen_loss + rgb_loss
+        loss = rgb_loss
         loss.backward()
         opt_rgb.step()
 
         # Train discriminator
-        opt_disc.zero_grad()
-        disc_loss = .01 * F.relu(1 + discriminator(rgb_decoder(simulated_features))).mean()
-        disc_loss += .01 * F.relu(1 - discriminator(real_rgb)).mean()
-        ts.collect('RGB disc loss', disc_loss)
-        disc_loss.backward()
-        opt_disc.step()
+        #opt_disc.zero_grad()
+        #disc_loss = .01 * F.relu(1 + discriminator(rgb_decoder(simulated_features))).mean()
+        #disc_loss += .01 * F.relu(1 - discriminator(real_rgb)).mean()
+        #ts.collect('RGB disc loss', disc_loss)
+        #disc_loss.backward()
+        #opt_disc.step()
 
     print(ts)
     print('Finished')
@@ -459,7 +460,8 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
     ftr_vid = imutil.Video('simulation_ftr_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     factor_vids = []
     for i in range(num_factors):
-        factor_vids.append(imutil.Video('separable_factor_{:03d}.mp4'.format(i), framerate=3))
+        factor_filename = 'factor_videos/separable_factor_{:03d}_iter_{:06d}.mp4'.format(i, train_iter)
+        factor_vids.append(imutil.Video(factor_filename, framerate=3))
 
     # First: replay in simulation the true trajectory
     caption = 'Real'
