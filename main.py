@@ -88,7 +88,7 @@ def main():
             #filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
             #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
 
-            visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_actions=num_actions, num_factors=latent_dim)
+            visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
             visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
 
             # Periodically compute expensive metrics
@@ -334,6 +334,7 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
     # Image of reconstruction
     filename = 'vis_iter_{:06d}.png'.format(train_iter)
     num_actions = datasource.NUM_ACTIONS
+    num_rewards = datasource.NUM_REWARDS
     timesteps = 60
     batch_size = 1
     states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps, random_start=False)
@@ -379,7 +380,7 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
             vid_rgb.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
 
             caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
-            reward_pixels = composite_rgb_reward_factor_image(predicted_rgb, reward_map, z)
+            reward_pixels = composite_rgb_reward_factor_image(predicted_rgb, reward_map, z, num_rewards=num_rewards)
             vid_reward.write_frame(reward_pixels, normalize=False, caption=caption)
 
         vid_rgb.finish()
@@ -440,11 +441,13 @@ def composite_aleatoric_surprise_image(x_t_pixels, surprise_map, z, num_factors 
     return composite_visual
 
 
-def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_pred, train_iter=0, timesteps=60, num_actions=4, num_factors=16):
+def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_pred, train_iter=0, timesteps=60, num_factors=16):
     start_time = time.time()
     print('Starting trajectory simulation for {} frames'.format(timesteps))
     states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size=1, timesteps=timesteps, random_start=False)
     states = torch.Tensor(states).cuda()
+    num_actions = datasource.NUM_ACTIONS
+    num_rewards = datasource.NUM_REWARDS
     rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
     # We begin *at* state t=2, then we simulate from t=2 until t=timesteps
     # Encoder input is t=0, t=1, t=2 to produce t=1
@@ -462,18 +465,8 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
     caption = 'Real'
     simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
                                     states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid,
-                                    factor_vids, caption_tag=caption)
+                                    factor_vids, caption_tag=caption, num_rewards=num_rewards)
 
-    # Then, play out a simulation of a counterfactual
-    actions[0, :] = 4  # no-op
-    actions[0, 3] = 2  # force field left
-    actions[0, 4] = 3  # force field right
-    actions[0, 5] = 0  # psi storm left
-    actions[0, 6] = 1  # psi storm right
-    caption = 'Cft.'
-    simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
-                                    states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid,
-                                    factor_vids, caption_tag=caption)
     for vid in factor_vids:
         vid.finish()
     rgb_vid.finish()
@@ -484,9 +477,9 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
 
 def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, transition,
                                      states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid, factor_vids,
-                                     timesteps=60, caption_tag='', num_actions=5, num_rewards=4):
-    estimated_cumulative_reward = np.zeros(4)
-    true_cumulative_reward = np.zeros(4)
+                                     timesteps=60, caption_tag='', num_actions=4, num_rewards=4):
+    estimated_cumulative_reward = np.zeros(num_rewards)
+    true_cumulative_reward = np.zeros(num_rewards)
     estimated_rewards = []
     for t in range(2, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
