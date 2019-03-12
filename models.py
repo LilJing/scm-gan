@@ -15,7 +15,7 @@ from spatial_recurrent import CSRN
 from coordconv import CoordConv2d
 
 INPUT_FRAMES = 3
-COLOR_CHANNELS = 10
+COLOR_CHANNELS = 4
 INPUT_CHANNELS = COLOR_CHANNELS * INPUT_FRAMES
 
 

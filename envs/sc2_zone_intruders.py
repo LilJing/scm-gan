@@ -50,7 +50,7 @@ def play_game_thread():
 
 
 def default_policy(*args, **kwargs):
-    if np.random.random() < 0.75:
+    if np.random.random() < 0.6:
         return NO_OP_ACTION
     return env.action_space.sample()
 
