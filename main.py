@@ -88,6 +88,7 @@ def main():
             #filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
             #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
 
+            #measure_prediction_mse(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
             visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
             visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
 
@@ -521,6 +522,42 @@ def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, trans
         ftr_vid.write_frame(ftr_pixels, caption=caption, normalize=False)
     print('True cumulative reward: {}'.format(format_reward_vector(true_cumulative_reward)))
     print('Estimated cumulative reward: {}'.format(format_reward_vector(estimated_cumulative_reward)))
+
+
+def measure_prediction_mse(datasource, encoder, decoder, rgb_decoder, transition, reward_pred, train_iter=0, timesteps=100, num_factors=16):
+    batch_size = 32
+    num_actions = datasource.NUM_ACTIONS
+    num_rewards = datasource.NUM_REWARDS
+    states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size=batch_size, timesteps=timesteps, random_start=False)
+    states = torch.Tensor(states).cuda()
+    rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
+    rewards = torch.Tensor(rewards).cuda()
+    dones = torch.Tensor(dones.astype(int)).cuda()
+
+    # We begin *at* state t=2, then we simulate from t=2 until t=timesteps
+    # Encoder input is t=0, t=1, t=2 to produce t=1
+    z = encoder(states[:, :3])
+    z = transition(z, torch.eye(num_actions)[actions[:, 1]].cuda())
+    z.detach()
+
+    # Simulate the future, compare with reality
+    mse_losses = []
+    active_mask = torch.ones(batch_size).cuda()
+    for t in range(2, timesteps):
+        active_mask = active_mask * (1 - dones[:, t])
+        expected = states[:, t]
+        predicted = decoder(z)
+        diffs = active_mask * ((expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
+        rec_loss = torch.mean(diffs) * batch_size / torch.sum(active_mask)
+        print('MSE t={} {:.04f}\n'.format(t, rec_loss))
+        mse_losses.append(float(rec_loss))
+
+        mae_loss = torch.mean(torch.abs(expected - predicted))
+        print('MAE t={} {:.04f}\n'.format(t, mae_loss))
+        mae_losses.append(float(mae_loss))
+        z = transition(z, torch.eye(num_actions)[actions[:, t]].cuda())
+
+    print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
 
 if __name__ == '__main__':
