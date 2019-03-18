@@ -12,7 +12,7 @@ from sc2env.environments.zone_intruders import ZoneIntrudersEnvironment
 
 REPLAY_BUFFER_LEN = 60
 MIN_REPLAY_BUFFER_LEN = 4
-MAX_TRAJECTORY_LEN = 100
+MAX_TRAJECTORY_LEN = 120
 MAX_EPISODES_PER_ENVIRONMENT = 500
 NUM_ACTIONS = 4
 NUM_REWARDS = 2
@@ -50,9 +50,8 @@ def play_game_thread():
 
 
 def default_policy(*args, **kwargs):
-    if np.random.random() < 0.6:
-        return NO_OP_ACTION
     return env.action_space.sample()
+
 
 # Simulate batch_size episodes and add them to the replay buffer
 def simulate_to_replay_buffer(batch_size):
