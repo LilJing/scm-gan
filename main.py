@@ -76,7 +76,7 @@ def main():
     # Blur for foreground mask
     blur = models.GaussianSmoothing(channels=1, kernel_size=5, sigma=3)
 
-    for train_iter in range(train_iters):
+    for train_iter in range(1, train_iters):
         if train_iter % 1000 == 0:
             print('Evaluating networks...')
             test_mode([encoder, decoder, rgb_decoder, transition, discriminator])
@@ -185,16 +185,38 @@ def main():
             loss += .01 * theta * t_l1_loss
             z = new_z
 
-        # Apply TD-RNN loss
-        # Predict state t+3 by T(E(s_2), a_2) and also by T(T(E(s_1),a_1),a_2)
-        # They should be consistent: long-term expectations should match later short-term expectations
-        twostep_prediction = transition(z0, torch.eye(num_actions)[actions[:, 2]].cuda())
-        twostep_prediction = transition(twostep_prediction, torch.eye(num_actions)[actions[:, 3]].cuda())
-        onestep_prediction = encoder(states[:, 1:4])
-        onestep_prediction = transition(encoder(states[:, 1:4]), torch.eye(num_actions)[actions[:, 2]].cuda())
-        consistency_loss = torch.mean((twostep_prediction - onestep_prediction)**2)
-        ts.collect('TDC 2:1', consistency_loss)
-        loss += .1 * theta * consistency_loss
+        # TD-Lambda Loss
+        # State i|j is the predicted state at time i conditioned on observation j
+        # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
+        # Also, state 3|1 will be equal to state 3|2
+        td_lambda_loss = 0
+        lamb = 0.99
+        z_set = {}
+        for t_r in range(2, prediction_horizon):
+            # Encode the ground-truth state for t_r
+            z = encoder(states[:, t_r-2:t_r+1])
+            a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
+            z_set[t_r] = transition(z, a)
+
+            # For each previous t_left, step forward to t_r
+            for t_left in range(2, t_r):
+                a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
+                z_set[t_left] = transition(z_set[t_left], a)
+
+            # At time t_r, consider each combination (t_a, t_b) where a < b <= r
+            # At t_a, we thought t_r would be s_{r|a}
+            # But later at t_b, we updated our belief to s_{r|b}
+            # Update s_{r|a} to be closer to s_{r|b}, for every b up to and including s_{r|r}
+            for t_a in range(2, t_r):
+                for t_b in range(2, t_a):
+                    expected = z_set[t_a]
+                    actual = z_set[t_b].detach()
+                    td_loss = torch.mean((expected - actual)**2)
+                    ts.collect('TD {}:{}'.format(t_b,t_a), td_loss)
+                    td_lambda_loss += lamb ** (t_b - t_a - 1) * td_loss
+
+        ts.collect('TD', td_lambda_loss)
+        loss += .1 * theta * td_lambda_loss
 
         loss.backward()
 
