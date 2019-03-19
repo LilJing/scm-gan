@@ -8,15 +8,15 @@ from threading import Thread
 import imutil
 import gym
 
-from sc2env.environments.zergling_defense import ZerglingDefenseEnvironment
+from sc2env.environments.zone_intruders import ZoneIntrudersEnvironment
 
-REPLAY_BUFFER_LEN = 100
+REPLAY_BUFFER_LEN = 50
 MIN_REPLAY_BUFFER_LEN = 4
-MAX_TRAJECTORY_LEN = 20
+MAX_TRAJECTORY_LEN = 150
 MAX_EPISODES_PER_ENVIRONMENT = 500
-NUM_ACTIONS = 5
-NUM_REWARDS = 4
-NO_OP_ACTION = 4
+NUM_ACTIONS = 4
+NUM_REWARDS = 2
+NO_OP_ACTION = 0
 
 replay_buffer = []
 initialized = False
@@ -30,7 +30,7 @@ def init():
     global env
     global initialized
     global sim_thread
-    env = ZerglingDefenseEnvironment()
+    env = ZoneIntrudersEnvironment()
     sim_thread = Thread(target=play_game_thread)
     sim_thread.daemon = True  # hack to kill on ctrl+C
     sim_thread.start()
@@ -50,9 +50,8 @@ def play_game_thread():
 
 
 def default_policy(*args, **kwargs):
-    if np.random.random() < 0.9:
-        return NO_OP_ACTION
     return env.action_space.sample()
+
 
 # Simulate batch_size episodes and add them to the replay buffer
 def simulate_to_replay_buffer(batch_size):
@@ -82,7 +81,7 @@ def play_episode(env, policy):
             done = True
         if done:
             break
-        state, reward_sum, done, info = env.step(action)
+        state, reward_sum, _, info = env.step(action)
         reward = np.array(list(info.values()))
     trajectory = (np.array(states), np.array(rgb_states), np.array(rewards), np.array(actions))
     add_to_replay_buffer(trajectory)
@@ -147,7 +146,7 @@ def convert_frame(state, width=64, height=64):
 
 
 if __name__ == '__main__':
-    env = ZerglingDefenseEnvironment()
+    env = ZoneIntrudersEnvironment()
     while True:
         simulate_to_replay_buffer(1)
         import pdb; pdb.set_trace()

@@ -15,7 +15,8 @@ from spatial_recurrent import CSRN
 from coordconv import CoordConv2d
 
 INPUT_FRAMES = 3
-INPUT_CHANNELS = 3 * INPUT_FRAMES
+COLOR_CHANNELS = 4
+INPUT_CHANNELS = COLOR_CHANNELS * INPUT_FRAMES
 
 
 class Transition(nn.Module):
@@ -24,13 +25,15 @@ class Transition(nn.Module):
         # Input: State + Action
         # Output: State
         self.latent_size = latent_size
+
+        # Skip connections from output of 1 to input of 6, and output of 2 to input of 5
         self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 32, (4,4), stride=2, padding=1))
         self.conv2 = SpectralNorm(nn.Conv2d(32, 64, (4,4), stride=2, padding=1))
-        self.conv3 = SpectralNorm(nn.Conv2d(64, 128, (4,4), stride=2, padding=1))
+        self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (4,4), stride=2, padding=1))
 
-        self.conv4 = SpectralNorm(nn.ConvTranspose2d(128, 64, (4,4), stride=2, padding=1))
-        self.conv5 = SpectralNorm(nn.ConvTranspose2d(64, 32, (4,4), stride=2, padding=1))
-        self.conv6 = nn.ConvTranspose2d(32, latent_size, (4,4), stride=2, padding=1)
+        self.conv4 = SpectralNorm(nn.ConvTranspose2d(64, 64, (4,4), stride=2, padding=1))
+        self.conv5 = SpectralNorm(nn.ConvTranspose2d(64 + 64, 32, (4,4), stride=2, padding=1))
+        self.conv6 = nn.ConvTranspose2d(32 + 32, latent_size, (4,4), stride=2, padding=1)
         self.cuda()
 
     def forward(self, z_map, actions):
@@ -43,17 +46,28 @@ class Transition(nn.Module):
         actions = actions.unsqueeze(-1).unsqueeze(-1)
         actions = actions.repeat(1, 1, height, width)
 
+        # Convolve down, saving skips
         x = torch.cat([z_map, actions], dim=1)
         x = self.conv1(x)
         x = F.leaky_relu(x)
+        skip1 = x.clone()
+
         x = self.conv2(x)
         x = F.leaky_relu(x)
+        skip2 = x.clone()
+
         x = self.conv3(x)
         x = F.leaky_relu(x)
+
+        # Convolve back up, using saved skips
         x = self.conv4(x)
         x = F.leaky_relu(x)
+
+        x = torch.cat([x, skip2], dim=1)
         x = self.conv5(x)
         x = F.leaky_relu(x)
+
+        x = torch.cat([x, skip1], dim=1)
         x = self.conv6(x)
         x = torch.sigmoid(x)
         return x
@@ -67,8 +81,8 @@ class Encoder(nn.Module):
         self.conv1 = nn.Conv2d(INPUT_CHANNELS, 64, (5,5), stride=1, padding=2)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.Conv2d(64, 64, (3,3), stride=1, padding=1)
-        self.conv3 = nn.Conv2d(64, 64, (5,5), stride=2, padding=2)
+        self.conv2 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=1, padding=1))
+        self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (5,5), stride=2, padding=2))
         self.conv4 = nn.Conv2d(64, latent_size, (5,5), stride=1, padding=2)
 
         # Bxlatent_size
@@ -125,17 +139,32 @@ class Discriminator(nn.Module):
 
 
 class RewardPredictor(nn.Module):
-    def __init__(self, latent_dim):
+    # Predicts multiple reward types, if you have multiple reward signals
+    def __init__(self, latent_dim, num_rewards):
         super().__init__()
-        self.conv1 = nn.Conv2d(latent_dim, 32, (3,3), stride=1, padding=0)
-        self.conv2 = nn.Conv2d(32, 1, (3,3), stride=1, padding=0)
+        self.conv1 = nn.Conv2d(latent_dim, 64, (3,3), stride=1, padding=0)
+        self.conv2 = nn.Conv2d(64, 32, (3,3), stride=1, padding=0)
+
+        # Each reward is discretized into a 3-way classification: +1, -1, or 0
+        self.conv3 = nn.Conv2d(32, num_rewards * 3, (3,3), stride=2, padding=0)
         self.cuda()
 
-    def forward(self, x):
+    def forward(self, x, visualize=False):
         x = self.conv1(x)
-        x = F.relu(x)
+        x = F.leaky_relu(x)
         x = self.conv2(x)
-        return x.mean(-1).mean(-1).sum(-1)
+        x = F.leaky_relu(x)
+        x = self.conv3(x)
+
+        # Classify each pixel as +1, -1, or 0 (for each reward type)
+        batch_size, channels, height, width = x.shape
+        x = x.view(batch_size, 3, channels // 3, height, width)
+        x = torch.softmax(x, dim=1)
+        # Return the cumulative reward (for each reward type)
+        x = x[:, 0] - x[:, 2]
+        if visualize:
+            return x.sum(-1).sum(-1), x
+        return x.sum(-1).sum(-1)
 
 
 class Decoder(nn.Module):
@@ -148,7 +177,7 @@ class Decoder(nn.Module):
                         stride=2, padding=1, groups=latent_size, bias=False)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*3, (3,3),
+        self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*COLOR_CHANNELS, (3,3),
                         stride=1, padding=1, groups=latent_size, bias=False)
         #self.bg = nn.Parameter(torch.zeros((3, IMG_SIZE, IMG_SIZE)).cuda())
         self.cuda()
@@ -162,16 +191,36 @@ class Decoder(nn.Module):
 
         x = self.conv2(x)
         # Sum the separate items
-        x = x.view(batch_size, latent_size, 3, height*2, width*2)
+        x = x.view(batch_size, latent_size, COLOR_CHANNELS, height*2, width*2)
 
         # Optional: Learn to subtract static background, separate from objects
         #x = x + self.bg
         if visualize:
-            visualization = imutil.show(x[0], img_padding=8, save=False, display=False, return_pixels=True)
+            visualization = x[0]
+            #imutil.show(x[0], img_padding=8, save=False, display=False, return_pixels=True)
         x = torch.sum(x, dim=1)
         if visualize:
             return x, visualization
         return x
+
+
+class RGBDecoder(nn.Module):
+    def __init__(self, img_size=256):
+        super().__init__()
+        self.conv1 = nn.ConvTranspose2d(COLOR_CHANNELS, 32, (4,4), stride=2, padding=1)
+        self.conv2 = nn.ConvTranspose2d(32, 3, (4,4), stride=2, padding=1)
+        self.bg = nn.Parameter(torch.zeros((3, img_size, img_size)).cuda())
+        self.cuda()
+
+    def forward(self, x, enable_bg=True):
+        x = self.conv1(x)
+        x = F.leaky_relu(x)
+        x = self.conv2(x)
+        if enable_bg:
+            x = x + self.bg
+        x = torch.sigmoid(x)
+        return x
+
 
 
 # https://discuss.pytorch.org/t/is-there-anyway-to-do-gaussian-filtering-for-an-image-2d-3d-in-pytorch/12351/8
