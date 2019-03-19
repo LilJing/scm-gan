@@ -10,9 +10,9 @@ import gym
 
 from sc2env.environments.zone_intruders import ZoneIntrudersEnvironment
 
-REPLAY_BUFFER_LEN = 60
+REPLAY_BUFFER_LEN = 50
 MIN_REPLAY_BUFFER_LEN = 4
-MAX_TRAJECTORY_LEN = 120
+MAX_TRAJECTORY_LEN = 150
 MAX_EPISODES_PER_ENVIRONMENT = 500
 NUM_ACTIONS = 4
 NUM_REWARDS = 2
@@ -81,7 +81,7 @@ def play_episode(env, policy):
             done = True
         if done:
             break
-        state, reward_sum, done, info = env.step(action)
+        state, reward_sum, _, info = env.step(action)
         reward = np.array(list(info.values()))
     trajectory = (np.array(states), np.array(rgb_states), np.array(rewards), np.array(actions))
     add_to_replay_buffer(trajectory)
