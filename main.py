@@ -5,6 +5,9 @@ import time
 import math
 import os
 
+# hack
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -45,12 +48,12 @@ def main():
     datasource = select_environment(args.env)
     num_actions = datasource.NUM_ACTIONS
     num_rewards = datasource.NUM_REWARDS
-    encoder = models.Encoder(latent_dim)
+    encoder = nn.DataParallel(models.Encoder(latent_dim))
     decoder = models.Decoder(latent_dim)
     reward_predictor = models.RewardPredictor(latent_dim, num_rewards)
     discriminator = models.Discriminator()
     rgb_decoder = models.RGBDecoder()
-    transition = models.Transition(latent_dim, num_actions)
+    transition = nn.DataParallel(models.Transition(latent_dim, num_actions))
 
     #load_from_dir = '.'
     #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_07dc24bf'
@@ -135,6 +138,9 @@ def main():
         active_mask = torch.ones(batch_size).cuda()
 
         loss = 0
+        td_lambda_loss = 0
+        lamb = 0.9
+        td_z_set = {}
         # Given the state encoded at t=2, predict state at t=3, t=4, ...
         for t in range(2, prediction_horizon):
             active_mask = active_mask * (1 - dones[:, t])
@@ -142,9 +148,9 @@ def main():
             # Predict reward
             expected_reward = reward_predictor(z)
             actual_reward = rewards[:, t]
-            reward_difference = torch.mean(torch.mean(torch.abs(expected_reward - actual_reward), dim=1) * active_mask)
+            reward_difference = torch.mean(torch.mean((expected_reward - actual_reward)**2, dim=1) * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += .01 * reward_difference
+            loss += .1 * reward_difference
 
             # Reconstruction loss
             expected = states[:, t]
@@ -185,23 +191,20 @@ def main():
             loss += .01 * theta * t_l1_loss
             z = new_z
 
-        # TD-Lambda Loss
-        # State i|j is the predicted state at time i conditioned on observation j
-        # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
-        # Also, state 3|1 will be equal to state 3|2
-        td_lambda_loss = 0
-        lamb = 0.99
-        z_set = {}
-        for t_r in range(2, prediction_horizon):
+            # TD-Lambda Loss
+            # State i|j is the predicted state at time i conditioned on observation j
+            # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
+            # Also, state 3|1 will be equal to state 3|2
             # Encode the ground-truth state for t_r
-            z = encoder(states[:, t_r-2:t_r+1])
+            t_r = t
+            td_z = encoder(states[:, t_r-2:t_r+1])
             a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
-            z_set[t_r] = transition(z, a)
+            td_z_set[t_r] = transition(td_z, a)
 
             # For each previous t_left, step forward to t_r
             for t_left in range(2, t_r):
                 a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
-                z_set[t_left] = transition(z_set[t_left], a)
+                td_z_set[t_left] = transition(td_z_set[t_left], a)
 
             # At time t_r, consider each combination (t_a, t_b) where a < b <= r
             # At t_a, we thought t_r would be s_{r|a}
@@ -209,15 +212,14 @@ def main():
             # Update s_{r|a} to be closer to s_{r|b}, for every b up to and including s_{r|r}
             for t_a in range(2, t_r):
                 for t_b in range(2, t_a):
-                    expected = z_set[t_a]
-                    actual = z_set[t_b].detach()
+                    expected = td_z_set[t_a]
+                    actual = td_z_set[t_b].detach()
                     td_loss = torch.mean((expected - actual)**2)
                     ts.collect('TD {}:{}'.format(t_b,t_a), td_loss)
                     td_lambda_loss += lamb ** (t_b - t_a - 1) * td_loss
 
         ts.collect('TD', td_lambda_loss)
-        loss += .1 * theta * td_lambda_loss
-
+        loss += theta * td_lambda_loss
         loss.backward()
 
         opt_enc.step()
