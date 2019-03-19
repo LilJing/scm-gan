@@ -25,13 +25,15 @@ class Transition(nn.Module):
         # Input: State + Action
         # Output: State
         self.latent_size = latent_size
+
+        # Skip connections from output of 1 to input of 6, and output of 2 to input of 5
         self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 32, (4,4), stride=2, padding=1))
         self.conv2 = SpectralNorm(nn.Conv2d(32, 64, (4,4), stride=2, padding=1))
-        self.conv3 = SpectralNorm(nn.Conv2d(64, 128, (4,4), stride=2, padding=1))
+        self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (4,4), stride=2, padding=1))
 
-        self.conv4 = SpectralNorm(nn.ConvTranspose2d(128, 64, (4,4), stride=2, padding=1))
-        self.conv5 = SpectralNorm(nn.ConvTranspose2d(64, 32, (4,4), stride=2, padding=1))
-        self.conv6 = nn.ConvTranspose2d(32, latent_size, (4,4), stride=2, padding=1)
+        self.conv4 = SpectralNorm(nn.ConvTranspose2d(64, 64, (4,4), stride=2, padding=1))
+        self.conv5 = SpectralNorm(nn.ConvTranspose2d(64 + 64, 32, (4,4), stride=2, padding=1))
+        self.conv6 = nn.ConvTranspose2d(32 + 32, latent_size, (4,4), stride=2, padding=1)
         self.cuda()
 
     def forward(self, z_map, actions):
@@ -44,17 +46,28 @@ class Transition(nn.Module):
         actions = actions.unsqueeze(-1).unsqueeze(-1)
         actions = actions.repeat(1, 1, height, width)
 
+        # Convolve down, saving skips
         x = torch.cat([z_map, actions], dim=1)
         x = self.conv1(x)
         x = F.leaky_relu(x)
+        skip1 = x.clone()
+
         x = self.conv2(x)
         x = F.leaky_relu(x)
+        skip2 = x.clone()
+
         x = self.conv3(x)
         x = F.leaky_relu(x)
+
+        # Convolve back up, using saved skips
         x = self.conv4(x)
         x = F.leaky_relu(x)
+
+        x = torch.cat([x, skip2], dim=1)
         x = self.conv5(x)
         x = F.leaky_relu(x)
+
+        x = torch.cat([x, skip1], dim=1)
         x = self.conv6(x)
         x = torch.sigmoid(x)
         return x
@@ -68,8 +81,8 @@ class Encoder(nn.Module):
         self.conv1 = nn.Conv2d(INPUT_CHANNELS, 64, (5,5), stride=1, padding=2)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.Conv2d(64, 64, (3,3), stride=1, padding=1)
-        self.conv3 = nn.Conv2d(64, 64, (5,5), stride=2, padding=2)
+        self.conv2 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=1, padding=1))
+        self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (5,5), stride=2, padding=2))
         self.conv4 = nn.Conv2d(64, latent_size, (5,5), stride=1, padding=2)
 
         # Bxlatent_size
