@@ -291,12 +291,15 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     z = transition(z, onehot(0))
 
     true_reward = 0
+    vid = imutil.Video('SimpleRolloutAgent-{}.mp4'.format(int(time.time())))
+    t = 2
     while not done:
+        z = z.detach()
         # In simulation, compute all possible futures to select the best action
         rewards = []
         for a in range(num_actions):
             z_a = transition(z, onehot(a))
-            r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions)
+            r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions, a)
             rewards.append(r_a)
             print('Expected reward from taking action {} is {:.03f}'.format(a, r_a))
         max_r = max(rewards)
@@ -309,10 +312,15 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
 
         # Re-estimate state
         ftr_state, rgb_state = datasource.convert_frame(new_state)
-        imutil.show(rgb_state, resize_to=(512, 512))
+        caption = 't={} cumulative r={} est. future r={}'.format(t, true_reward, max_r)
+        print(caption)
+        vid.write_frame(rgb_state, resize_to=(512,512), caption=caption)
+
         state_list = state_list[1:] + [ftr_state]
         z = encoder(torch.Tensor(state_list).unsqueeze(0))
         z = transition(z, onehot(max_a))
+        t += 1
+    vid.finish()
     print('Finished with cumulative reward {}'.format(true_reward))
 
 
@@ -324,21 +332,26 @@ def onehot(a_idx, num_actions=4):
     return torch.eye(num_actions)[a_idx].cuda()
 
 
-def compute_rollout_reward(z, transition, reward_predictor, num_actions, rollout_width=32, rollout_depth=64):
+def compute_rollout_reward(z, transition, reward_predictor, num_actions, selected_action, rollout_width=64, rollout_depth=32):
     # Initialize a beam
     z = z.repeat(rollout_width, 1, 1, 1)
     # Initialize a cumulative reward vector
     cumulative_reward = reward_predictor(z)
     # Starting from z, move forward in time and count the rewards
     for i in range(rollout_depth):
-        # Take a random action, accumulate reward
-        a_idx = np.random.randint(num_actions, size=rollout_width)
+        z = z.detach()
+        if i < 8:
+            # Hack for high-resolution environments, repeat first action a few times
+            a_idx = [selected_action] * rollout_width
+        else:
+            # Take a random action, accumulate reward
+            a_idx = np.random.randint(num_actions, size=rollout_width)
         z = transition(z, onehot(a_idx))
         cumulative_reward += reward_predictor(z)
     # Average among the rollouts
     cumulative_reward = cumulative_reward.mean(dim=0)
     # Sum the positive/negative rewards
-    print('Cumulative reward: {}'.format(cumulative_reward))
+    #print('Cumulative reward: {}'.format(cumulative_reward))
     return float(cumulative_reward.sum())
 
 
