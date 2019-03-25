@@ -63,7 +63,8 @@ def main():
         reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward_predictor.pth')))
         rgb_decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-rgb_decoder.pth')))
 
-    train(latent_dim, datasource, num_actions, num_rewards, encoder, decoder, reward_predictor, discriminator, rgb_decoder, transition)
+    #train(latent_dim, datasource, num_actions, num_rewards, encoder, decoder, reward_predictor, discriminator, rgb_decoder, transition)
+    play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder, reward_predictor, discriminator, rgb_decoder, transition)
 
 
 def train(latent_dim, datasource, num_actions, num_rewards,
@@ -264,6 +265,81 @@ def evaluate(datasource, encoder, decoder, rgb_decoder, transition, discriminato
     # Periodically compute expensive metrics
     #if hasattr(datasource, 'simulator'):
     #    disentanglement_score = higgins_metric_conv(datasource.simulator, datasource.TRUE_LATENT_DIM, encoder, latent_dim)
+
+
+# Apply a simple model-predictive control algorithm using the learned model,
+# to take actions that will maximize reward
+def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
+         reward_predictor, discriminator,rgb_decoder, transition):
+
+    # Initialize environment
+    env = datasource.ZoneIntrudersEnvironment()
+
+    # No-op through the first 3 frames for initial state estimation
+    state = env.reset()
+    s_0, srgb_0 = datasource.convert_frame(state)
+    state, reward, done, info = env.step(0)
+    s_1, srgb_1 = datasource.convert_frame(state)
+    state, reward, done, info = env.step(0)
+    s_2, srgb_2 = datasource.convert_frame(state)
+    state_list = [s_0, s_1, s_2]
+    rgb_states = np.array([srgb_0, srgb_1, srgb_2])
+
+    # Estimate initial state (given t=0,1,2 estimate state at t=2)
+    states = torch.Tensor(state_list).unsqueeze(0)
+    z = encoder(states)
+    z = transition(z, onehot(0))
+
+    true_reward = 0
+    while not done:
+        # In simulation, compute all possible futures to select the best action
+        rewards = []
+        for a in range(num_actions):
+            z_a = transition(z, onehot(a))
+            r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions)
+            rewards.append(r_a)
+            print('Expected reward from taking action {} is {:.03f}'.format(a, r_a))
+        max_r = max(rewards)
+        max_a = int(np.argmax(rewards))
+        print('Optimal action: {} with reward {:.02f}'.format(max_a, max_r))
+
+        # Take the best action, in real life
+        new_state, new_reward, done, info = env.step(max_a)
+        true_reward += new_reward
+
+        # Re-estimate state
+        ftr_state, rgb_state = datasource.convert_frame(new_state)
+        imutil.show(rgb_state, resize_to=(512, 512))
+        state_list = state_list[1:] + [ftr_state]
+        z = encoder(torch.Tensor(state_list).unsqueeze(0))
+        z = transition(z, onehot(max_a))
+    print('Finished with cumulative reward {}'.format(true_reward))
+
+
+def onehot(a_idx, num_actions=4):
+    if type(a_idx) is int:
+        # Usage: onehot(2)
+        return torch.eye(num_actions)[a_idx].unsqueeze(0).cuda()
+    # Usage: onehot([1,2,3])
+    return torch.eye(num_actions)[a_idx].cuda()
+
+
+def compute_rollout_reward(z, transition, reward_predictor, num_actions, rollout_width=32, rollout_depth=64):
+    # Initialize a beam
+    z = z.repeat(rollout_width, 1, 1, 1)
+    # Initialize a cumulative reward vector
+    cumulative_reward = reward_predictor(z)
+    # Starting from z, move forward in time and count the rewards
+    for i in range(rollout_depth):
+        # Take a random action, accumulate reward
+        a_idx = np.random.randint(num_actions, size=rollout_width)
+        z = transition(z, onehot(a_idx))
+        cumulative_reward += reward_predictor(z)
+    # Average among the rollouts
+    cumulative_reward = cumulative_reward.mean(dim=0)
+    # Sum the positive/negative rewards
+    print('Cumulative reward: {}'.format(cumulative_reward))
+    return float(cumulative_reward.sum())
 
 
 def test_mode(networks):
