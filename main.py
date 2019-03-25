@@ -41,9 +41,7 @@ def select_environment(env_name):
 
 
 def main():
-    batch_size = 32
     latent_dim = 16
-    train_iters = 100 * 1000
 
     datasource = select_environment(args.env)
     num_actions = datasource.NUM_ACTIONS
@@ -55,8 +53,6 @@ def main():
     rgb_decoder = models.RGBDecoder()
     transition = nn.DataParallel(models.Transition(latent_dim, num_actions))
 
-    #load_from_dir = '.'
-    #load_from_dir = '/mnt/nfs/experiments/default/scm-gan_07dc24bf'
     load_from_dir = args.load_from or '.'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
         print('Loading models from directory {}'.format(load_from_dir))
@@ -67,7 +63,14 @@ def main():
         reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward_predictor.pth')))
         rgb_decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-rgb_decoder.pth')))
 
-    # Train the autoencoder
+    train(latent_dim, datasource, num_actions, num_rewards, encoder, decoder, reward_predictor, discriminator, rgb_decoder, transition)
+
+
+def train(latent_dim, datasource, num_actions, num_rewards,
+          encoder, decoder, reward_predictor, discriminator, rgb_decoder, transition):
+    batch_size = 32
+    train_iters = 100 * 1000
+
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
@@ -81,23 +84,7 @@ def main():
 
     for train_iter in range(1, train_iters):
         if train_iter % 1000 == 0:
-            print('Evaluating networks...')
-            test_mode([encoder, decoder, rgb_decoder, transition, discriminator])
-
-            # Run visualizations
-            #est_reward = format_reward_vector(reward_predictor(z0)[0])
-            #caption = 'Left: Input, Right: Generated. iter: {:06d} R: {}'.format(train_iter, est_reward)
-            #pixels = torch.cat([expected[0], actual[0]], dim=-1)
-            #filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
-            #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
-
-            #measure_prediction_mse(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
-            visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
-            visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
-
-            # Periodically compute expensive metrics
-            #if hasattr(datasource, 'simulator'):
-            #    disentanglement_score = higgins_metric_conv(datasource.simulator, datasource.TRUE_LATENT_DIM, encoder, latent_dim)
+            evaluate(datasource, encoder, decoder, rgb_decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=train_iter)
 
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
@@ -110,7 +97,7 @@ def main():
         theta = (train_iter / train_iters)
         prediction_horizon = 5 + int(5 * theta)
 
-        train_mode([encoder, decoder, rgb_decoder, transition, discriminator])
+        train_mode([encoder, decoder, rgb_decoder, transition, discriminator, reward_predictor])
 
         # Train encoder/transition/decoder
         opt_enc.zero_grad()
@@ -257,6 +244,26 @@ def main():
 
     print(ts)
     print('Finished')
+
+
+def evaluate(datasource, encoder, decoder, rgb_decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=0):
+    print('Evaluating networks...')
+    test_mode([encoder, decoder, rgb_decoder, transition, discriminator, reward_predictor])
+
+    # Run visualizations
+    #est_reward = format_reward_vector(reward_predictor(z0)[0])
+    #caption = 'Left: Input, Right: Generated. iter: {:06d} R: {}'.format(train_iter, est_reward)
+    #pixels = torch.cat([expected[0], actual[0]], dim=-1)
+    #filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
+    #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
+
+    #measure_prediction_mse(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
+    visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
+    visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
+
+    # Periodically compute expensive metrics
+    #if hasattr(datasource, 'simulator'):
+    #    disentanglement_score = higgins_metric_conv(datasource.simulator, datasource.TRUE_LATENT_DIM, encoder, latent_dim)
 
 
 def test_mode(networks):
