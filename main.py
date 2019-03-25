@@ -277,10 +277,11 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
 
     # No-op through the first 3 frames for initial state estimation
     state = env.reset()
+    no_op = 3
     s_0, srgb_0 = datasource.convert_frame(state)
-    state, reward, done, info = env.step(0)
+    state, reward, done, info = env.step(no_op)
     s_1, srgb_1 = datasource.convert_frame(state)
-    state, reward, done, info = env.step(0)
+    state, reward, done, info = env.step(no_op)
     s_2, srgb_2 = datasource.convert_frame(state)
     state_list = [s_0, s_1, s_2]
     rgb_states = np.array([srgb_0, srgb_1, srgb_2])
@@ -288,10 +289,10 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     # Estimate initial state (given t=0,1,2 estimate state at t=2)
     states = torch.Tensor(state_list).unsqueeze(0)
     z = encoder(states)
-    z = transition(z, onehot(0))
+    z = transition(z, onehot(no_op))
 
     true_reward = 0
-    vid = imutil.Video('SimpleRolloutAgent-{}.mp4'.format(int(time.time())))
+    vid = imutil.Video('SimpleRolloutAgent-{}-OpenWorldGeneralizationTest.mp4'.format(int(time.time())))
     t = 2
     while not done:
         z = z.detach()
@@ -332,7 +333,7 @@ def onehot(a_idx, num_actions=4):
     return torch.eye(num_actions)[a_idx].cuda()
 
 
-def compute_rollout_reward(z, transition, reward_predictor, num_actions, selected_action, rollout_width=64, rollout_depth=32):
+def compute_rollout_reward(z, transition, reward_predictor, num_actions, selected_action, rollout_width=64, rollout_depth=20, negative_positive_tradeoff=10.):
     # Initialize a beam
     z = z.repeat(rollout_width, 1, 1, 1)
     # Initialize a cumulative reward vector
@@ -340,15 +341,19 @@ def compute_rollout_reward(z, transition, reward_predictor, num_actions, selecte
     # Starting from z, move forward in time and count the rewards
     for i in range(rollout_depth):
         z = z.detach()
-        if i < 8:
-            # Hack for high-resolution environments, repeat first action a few times
+        if i < 2:
+            # Repeat first action a few times
             a_idx = [selected_action] * rollout_width
+        elif i > 6:
+            # No-op once you reach the end
+            a_idx = [3] * rollout_width
         else:
             # Take a random action, accumulate reward
             a_idx = np.random.randint(num_actions, size=rollout_width)
         z = transition(z, onehot(a_idx))
         cumulative_reward += reward_predictor(z)
     # Average among the rollouts
+    cumulative_reward[:, 0] *= negative_positive_tradeoff
     cumulative_reward = cumulative_reward.mean(dim=0)
     # Sum the positive/negative rewards
     #print('Cumulative reward: {}'.format(cumulative_reward))
