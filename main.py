@@ -364,32 +364,33 @@ def onehot(a_idx, num_actions=4):
 
 
 def compute_rollout_reward(z, transition, reward_predictor, num_actions,
-                           selected_action, rollout_width=128, rollout_depth=16,
+                           selected_action, rollout_width=64, rollout_depth=16,
                            negative_positive_tradeoff=10.):
     # Initialize a beam
     z = z.repeat(rollout_width, 1, 1, 1)
+
+    # Use 3-step lookahead followed by a no-op rollout policy
+    noop = 3
+    actions = []
+    for i in range(num_actions):
+        for j in range(num_actions):
+            for k in range(num_actions):
+                actions.append([i, j, k] + [noop] * (rollout_depth - 3))
+    actions = torch.LongTensor(np.array(actions)).cuda()
+    assert len(actions) == rollout_width
+
     # Initialize a cumulative reward vector
     cumulative_reward = reward_predictor(z)
     # Starting from z, move forward in time and count the rewards
-    for i in range(rollout_depth):
+    for t in range(rollout_depth):
         z = z.detach()
-        if i < 2:
-            # Repeat first action a few times
-            a_idx = [selected_action] * rollout_width
-        elif i < 6:
-            # Take a random action, accumulate reward
-            a_idx = np.random.randint(num_actions, size=rollout_width)
-        else:
-            # No-op once you reach the end
-            a_idx = [3] * rollout_width
-        z = transition(z, onehot(a_idx))
+        z = transition(z, onehot(actions[:, t]))
         cumulative_reward += reward_predictor(z)
+
     # Average among the rollouts
-    cumulative_reward[:, 0] *= negative_positive_tradeoff
-    cumulative_reward = cumulative_reward.mean(dim=0)
-    # Sum the positive/negative rewards
-    #print('Cumulative reward: {}'.format(cumulative_reward))
-    return float(cumulative_reward.sum())
+    max_r, max_idx = cumulative_reward.sum(dim=1).max(dim=0)
+    print('Best possible reward {:.2f} from rollout: {}'.format(max_r, actions[max_idx, :3]))
+    return max_r
 
 
 def test_mode(networks):
