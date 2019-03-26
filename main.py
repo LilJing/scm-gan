@@ -292,7 +292,8 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     z = transition(z, onehot(no_op))
 
     true_reward = 0
-    vid = imutil.Video('SimpleRolloutAgent-{}-OpenWorldGeneralizationTest.mp4'.format(int(time.time())))
+    filename = 'SimpleRolloutAgent-{}.mp4'.format(int(time.time()))
+    vid = imutil.Video(filename, framerate=12)
     t = 2
     while not done:
         z = z.detach()
@@ -306,6 +307,14 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         max_r = max(rewards)
         max_a = int(np.argmax(rewards))
         print('Optimal action: {} with reward {:.02f}'.format(max_a, max_r))
+
+        if t == 12:
+            img = rgb_decoder(decoder(z))[0]
+            for _ in range(20):
+                vid.write_frame(img, resize_to=(512,512), caption="Simulation t+0")
+            generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=4, rollout_depth=40)
+            generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=16, rollout_depth=40)
+            generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=64, rollout_depth=40)
 
         # Take the best action, in real life
         new_state, new_reward, done, info = env.step(max_a)
@@ -325,6 +334,27 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     print('Finished with cumulative reward {}'.format(true_reward))
 
 
+def generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions,
+                                    vid=None, rollout_width=64, rollout_depth=20):
+    actions = np.random.randint(num_actions, size=(rollout_width, rollout_depth))
+    cumulative_rewards = torch.zeros(rollout_width).cuda()
+    z = z.repeat(rollout_width, 1, 1, 1)
+    for t in range(rollout_depth):
+        z = transition(z, onehot(actions[:, t]))
+        features = decoder(z)
+        img = rgb_decoder(features)
+        rewards = reward_predictor(z)
+        cumulative_rewards += rewards[:, 1] - rewards[:, 0]
+        mask = cumulative_rewards + 1
+        mask = torch.clamp(mask, 0, 1)
+        mask = mask.reshape(-1, 1, 1, 1)
+        best_score = float(torch.max(cumulative_rewards))
+        caption = "Simulation t={} best score: {:.2f}".format(t, best_score)
+        vid.write_frame(img * mask, resize_to=(512,512), caption=caption)
+    r_max, r_argmax = cumulative_rewards.max(), cumulative_rewards.argmax()
+    print('Simulation {} reward: {:.2f}'.format(r_argmax, r_max))
+
+
 def onehot(a_idx, num_actions=4):
     if type(a_idx) is int:
         # Usage: onehot(2)
@@ -333,7 +363,9 @@ def onehot(a_idx, num_actions=4):
     return torch.eye(num_actions)[a_idx].cuda()
 
 
-def compute_rollout_reward(z, transition, reward_predictor, num_actions, selected_action, rollout_width=64, rollout_depth=20, negative_positive_tradeoff=10.):
+def compute_rollout_reward(z, transition, reward_predictor, num_actions,
+                           selected_action, rollout_width=128, rollout_depth=16,
+                           negative_positive_tradeoff=10.):
     # Initialize a beam
     z = z.repeat(rollout_width, 1, 1, 1)
     # Initialize a cumulative reward vector
@@ -344,12 +376,12 @@ def compute_rollout_reward(z, transition, reward_predictor, num_actions, selecte
         if i < 2:
             # Repeat first action a few times
             a_idx = [selected_action] * rollout_width
-        elif i > 6:
-            # No-op once you reach the end
-            a_idx = [3] * rollout_width
-        else:
+        elif i < 6:
             # Take a random action, accumulate reward
             a_idx = np.random.randint(num_actions, size=rollout_width)
+        else:
+            # No-op once you reach the end
+            a_idx = [3] * rollout_width
         z = transition(z, onehot(a_idx))
         cumulative_reward += reward_predictor(z)
     # Average among the rollouts
