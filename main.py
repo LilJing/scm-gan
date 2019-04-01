@@ -308,6 +308,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         max_a = int(np.argmax(rewards))
         print('Optimal action: {} with reward {:.02f}'.format(max_a, max_r))
 
+        """
         if t == 12:
             img = rgb_decoder(decoder(z))[0]
             for _ in range(20):
@@ -315,6 +316,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
             generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=4, rollout_depth=40)
             generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=16, rollout_depth=40)
             generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=64, rollout_depth=40)
+        """
 
         # Take the best action, in real life
         new_state, new_reward, done, info = env.step(max_a)
@@ -330,6 +332,9 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         z = encoder(torch.Tensor(state_list).unsqueeze(0))
         z = transition(z, onehot(max_a))
         t += 1
+        if t > 300:
+            print('Ending evaluation due to time limit')
+            break
     vid.finish()
     print('Finished with cumulative reward {}'.format(true_reward))
 
@@ -370,12 +375,13 @@ def compute_rollout_reward(z, transition, reward_predictor, num_actions,
     z = z.repeat(rollout_width, 1, 1, 1)
 
     # Use 3-step lookahead followed by a no-op rollout policy
-    noop = 3
+    noop_idx = 3
     actions = []
     for i in range(num_actions):
         for j in range(num_actions):
             for k in range(num_actions):
-                actions.append([i, j, k] + [noop] * (rollout_depth - 3))
+                # Test the 3-action sequence [i,j,k] and then roll out
+                actions.append([i, j, k] + [noop_idx] * (rollout_depth - 3))
     actions = torch.LongTensor(np.array(actions)).cuda()
     assert len(actions) == rollout_width
 
@@ -386,6 +392,9 @@ def compute_rollout_reward(z, transition, reward_predictor, num_actions,
         z = z.detach()
         z = transition(z, onehot(actions[:, t]))
         cumulative_reward += reward_predictor(z)
+
+    # Heuristic, select level of "caution" about negative reward
+    cumulative_reward[:, 0] *= negative_positive_tradeoff
 
     # Average among the rollouts
     max_r, max_idx = cumulative_reward.sum(dim=1).max(dim=0)
