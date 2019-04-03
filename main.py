@@ -25,6 +25,7 @@ from tqdm import tqdm
 parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
 parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-v0, etc (see envs/ for list)')
 parser.add_argument('--load-from', required=True, help='Directory containing .pth models (default: .)')
+parser.add_argument('--evaluate', action='store_true', help='If true, evaluate instead of training')
 args = parser.parse_args()
 
 
@@ -60,8 +61,12 @@ def main():
         reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward_predictor.pth')))
         rgb_decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-rgb_decoder.pth')))
 
-    #train(latent_dim, datasource, num_actions, num_rewards, encoder, decoder, reward_predictor, discriminator, rgb_decoder, transition)
-    play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder, reward_predictor, discriminator, rgb_decoder, transition)
+    if args.evaluate:
+        play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
+             reward_predictor, discriminator, rgb_decoder, transition)
+    else:
+        train(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
+              reward_predictor, discriminator, rgb_decoder, transition)
 
 
 def train(latent_dim, datasource, num_actions, num_rewards,
@@ -132,7 +137,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             actual_reward = rewards[:, t]
             reward_difference = torch.mean(torch.mean((expected_reward - actual_reward)**2, dim=1) * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += .1 * reward_difference
+            loss += .01 * reward_difference
 
             # Reconstruction loss
             expected = states[:, t]
@@ -196,29 +201,15 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         # Begin StarCraft-Specific Hacks
         # For StarCraftII we use a two-stage decoder
         # The dynamics and planning model operates entirely in pysc2 feature space
-        # At the end, we append a GAN to convert features to human-visible RGB
-        # Train generator
+        # At the end, we convert features to human-visible RGB
         opt_rgb.zero_grad()
         real_rgb = rgb_states[:, 2]
         simulated_features = decoder(z0).detach()
         simulated_rgb = rgb_decoder(simulated_features)
         rgb_loss = torch.mean((real_rgb - simulated_rgb)**2)
         ts.collect('RGB loss', rgb_loss)
-
-        gen_loss = .001 * F.relu(1 - discriminator(simulated_rgb)).mean()
-        ts.collect('RGB gen loss', gen_loss)
-
-        loss = gen_loss + rgb_loss
-        loss.backward()
+        rgb_loss.backward()
         opt_rgb.step()
-
-        # Train discriminator
-        opt_disc.zero_grad()
-        disc_loss = .01 * F.relu(1 + discriminator(rgb_decoder(simulated_features))).mean()
-        disc_loss += .01 * F.relu(1 - discriminator(real_rgb)).mean()
-        ts.collect('RGB disc loss', disc_loss)
-        disc_loss.backward()
-        opt_disc.step()
         # End StarCraft-Specific Hacks
 
         ts.print_every(2)
