@@ -140,10 +140,6 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             # Reconstruction loss
             expected = states[:, t]
             predicted = decoder(z)
-            #bg_mse_multiplier = 0.1
-            #foreground_mask = (1 - bg_mse_multiplier) * blur(expected.mean(dim=-3, keepdim=True)**2) + bg_mse_multiplier
-            #mse_difference = (foreground_mask * (expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
-            #rec_loss = torch.mean(mse_difference * active_mask)
             rec_loss = torch.mean((expected - predicted) **2)
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
@@ -154,19 +150,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             ts.collect('L1 t={}'.format(t), l1_loss)
             loss += .01 * theta * l1_loss
 
-            # Spatially-Coherent Log-Determinant independence loss
-            # Sample 1000 random latent vector spatial points from the batch
-            #latent_vectors = blur(z).permute(0, 2, 3, 1).contiguous().view(-1, latent_dim)
-            #rand_indices = np.random.randint(0, len(latent_vectors), size=(1000,))
-            #z_samples = latent_vectors[rand_indices]
-            #covariance = cov(z_samples)
-            #eps = 1e-5
-            #log_det = -torch.log(torch.det(covariance / covariance.max()) + eps)
-            #log_det_penalty = theta * .01 * log_det
-            #ts.collect('Log-Det t={}'.format(t), log_det_penalty)
-            #loss += log_det_penalty
-
-            # Predict transition
+            # Predict transition to the next state
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
             # Apply transition L1 loss
