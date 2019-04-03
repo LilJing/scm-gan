@@ -5,9 +5,6 @@ import time
 import math
 import os
 
-# hack
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
-
 import numpy as np
 import torch
 import torch.nn as nn
