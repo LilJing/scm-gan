@@ -77,13 +77,10 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     opt_rgb = torch.optim.Adam(rgb_decoder.parameters(), lr=.01)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
 
-    # Blur for foreground mask
-    blur = models.GaussianSmoothing(channels=1, kernel_size=5, sigma=3)
-
     for train_iter in range(1, train_iters):
         if train_iter % 1000 == 0:
+            print('Evaluating networks...')
             evaluate(datasource, encoder, decoder, rgb_decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=train_iter)
-
             print('Saving networks to filesystem...')
             torch.save(transition.state_dict(), 'model-transition.pth')
             torch.save(encoder.state_dict(), 'model-encoder.pth')
@@ -184,7 +181,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     expected = td_z_set[t_a]
                     actual = td_z_set[t_b].detach()
                     td_loss = torch.mean((expected - actual)**2)
-                    ts.collect('TD {}:{}'.format(t_b,t_a), td_loss)
+                    ts.collect('TD {}:{}'.format(t_b, t_a), td_loss)
                     td_lambda_loss += lamb ** (t_b - t_a - 1) * td_loss
 
         ts.collect('TD', td_lambda_loss)
@@ -195,8 +192,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         opt_dec.step()
         opt_trans.step()
         opt_pred.step()
-        ts.print_every(2)
 
+        # Begin StarCraft-Specific Hacks
         # For StarCraftII we use a two-stage decoder
         # The dynamics and planning model operates entirely in pysc2 feature space
         # At the end, we append a GAN to convert features to human-visible RGB
@@ -208,22 +205,23 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         rgb_loss = torch.mean((real_rgb - simulated_rgb)**2)
         ts.collect('RGB loss', rgb_loss)
 
-        #gen_loss = .001 * F.relu(1 - discriminator(simulated_rgb)).mean()
-        #ts.collect('RGB gen loss', gen_loss)
+        gen_loss = .001 * F.relu(1 - discriminator(simulated_rgb)).mean()
+        ts.collect('RGB gen loss', gen_loss)
 
-        #loss = gen_loss + rgb_loss
-        loss = rgb_loss
+        loss = gen_loss + rgb_loss
         loss.backward()
         opt_rgb.step()
 
         # Train discriminator
-        #opt_disc.zero_grad()
-        #disc_loss = .01 * F.relu(1 + discriminator(rgb_decoder(simulated_features))).mean()
-        #disc_loss += .01 * F.relu(1 - discriminator(real_rgb)).mean()
-        #ts.collect('RGB disc loss', disc_loss)
-        #disc_loss.backward()
-        #opt_disc.step()
+        opt_disc.zero_grad()
+        disc_loss = .01 * F.relu(1 + discriminator(rgb_decoder(simulated_features))).mean()
+        disc_loss += .01 * F.relu(1 - discriminator(real_rgb)).mean()
+        ts.collect('RGB disc loss', disc_loss)
+        disc_loss.backward()
+        opt_disc.step()
+        # End StarCraft-Specific Hacks
 
+        ts.print_every(2)
     print(ts)
     print('Finished')
 
@@ -289,7 +287,6 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         max_a = int(np.argmax(rewards))
         print('Optimal action: {} with reward {:.02f}'.format(max_a, max_r))
 
-        """
         if t == 12:
             img = rgb_decoder(decoder(z))[0]
             for _ in range(20):
@@ -297,7 +294,6 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
             generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=4, rollout_depth=40)
             generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=16, rollout_depth=40)
             generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=64, rollout_depth=40)
-        """
 
         # Take the best action, in real life
         new_state, new_reward, done, info = env.step(max_a)
