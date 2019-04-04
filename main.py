@@ -45,10 +45,10 @@ def main():
     num_actions = datasource.NUM_ACTIONS
     num_rewards = datasource.NUM_REWARDS
     encoder = nn.DataParallel(models.Encoder(latent_dim))
-    decoder = models.Decoder(latent_dim)
-    reward_predictor = models.RewardPredictor(latent_dim, num_rewards)
-    discriminator = models.Discriminator()
-    rgb_decoder = models.RGBDecoder()
+    decoder = nn.DataParallel(models.Decoder(latent_dim))
+    reward_predictor = nn.DataParallel(models.RewardPredictor(latent_dim, num_rewards))
+    discriminator = nn.DataParallel(models.Discriminator())
+    rgb_decoder = nn.DataParallel(models.RGBDecoder())
     transition = nn.DataParallel(models.Transition(latent_dim, num_actions))
 
     load_from_dir = args.load_from or '.'
@@ -95,7 +95,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             torch.save(rgb_decoder.state_dict(), 'model-rgb_decoder.pth')
 
         theta = (train_iter / train_iters)
-        prediction_horizon = 5 + int(5 * theta)
+        prediction_horizon = 10 + int(10 * theta)
 
         train_mode([encoder, decoder, rgb_decoder, transition, discriminator, reward_predictor])
 
@@ -181,13 +181,15 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             # At t_a, we thought t_r would be s_{r|a}
             # But later at t_b, we updated our belief to s_{r|b}
             # Update s_{r|a} to be closer to s_{r|b}, for every b up to and including s_{r|r}
-            for t_a in range(2, t_r):
-                for t_b in range(2, t_a):
-                    expected = td_z_set[t_a]
-                    actual = td_z_set[t_b].detach()
-                    td_loss = torch.mean((expected - actual)**2)
-                    ts.collect('TD {}:{}'.format(t_b, t_a), td_loss)
-                    td_lambda_loss += lamb ** (t_b - t_a - 1) * td_loss
+            for t_a in range(2, t_r - 1):
+                t_b = t_a + 1
+                expected = td_z_set[t_a]
+                actual = td_z_set[t_b].detach()
+                td_loss = torch.mean((expected - actual)**2)
+                r_loss = torch.mean((reward_predictor(expected) - reward_predictor(actual))**2)
+                ts.collect('TD s {}:{}'.format(t_b, t_a), r_loss)
+                ts.collect('TD r {}:{}'.format(t_b, t_a), td_loss)
+                td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
 
         ts.collect('TD', td_lambda_loss)
         loss += theta * td_lambda_loss
