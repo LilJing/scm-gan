@@ -267,6 +267,9 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     z = encoder(states)
     z = transition(z, onehot(no_op))
 
+    from excitation_bptt import visualize_bptt
+    visualize_bptt(z, transition, reward_predictor, decoder, rgb_decoder, num_actions)
+
     true_reward = 0
     filename = 'SimpleRolloutAgent-{}.mp4'.format(int(time.time()))
     vid = imutil.Video(filename, framerate=12)
@@ -338,7 +341,7 @@ def onehot(a_idx, num_actions=4):
 
 def compute_rollout_reward(z, transition, reward_predictor, num_actions,
                            selected_action, rollout_width=64, rollout_depth=16,
-                           negative_positive_tradeoff=10.):
+                           negative_positive_tradeoff=1.0):
     # Initialize a beam
     z = z.repeat(rollout_width, 1, 1, 1)
 
