@@ -235,8 +235,8 @@ def evaluate(datasource, encoder, decoder, rgb_decoder, transition, discriminato
     #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
 
     #measure_prediction_mse(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
-    visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
-    visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
+    visualize_forward_simulation(datasource, encoder, decoder.module, rgb_decoder.module, transition, reward_predictor.module, train_iter, num_factors=latent_dim)
+    visualize_reconstruction(datasource, encoder, decoder.module, rgb_decoder.module, transition, reward_predictor.module, train_iter=train_iter)
 
     # Periodically compute expensive metrics
     #if hasattr(datasource, 'simulator'):
@@ -246,7 +246,7 @@ def evaluate(datasource, encoder, decoder, rgb_decoder, transition, discriminato
 # Apply a simple model-predictive control algorithm using the learned model,
 # to take actions that will maximize reward
 def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
-         reward_predictor, discriminator,rgb_decoder, transition):
+         reward_predictor, discriminator, rgb_decoder, transition):
 
     # Initialize environment
     env = datasource.ZoneIntrudersEnvironment()
