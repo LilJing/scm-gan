@@ -182,15 +182,17 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             # But later at t_b, we updated our belief to s_{r|b}
             # Update s_{r|a} to be closer to s_{r|b}, for every b up to and including s_{r|r}
             for t_a in range(2, t_r - 1):
+                # for t_b in range(2, t_a):
+                # Proper TD: use 4:3, 3:2, 2:1. Not 4:3, 4:2, 4:1, 3:2, 3:1...
                 t_b = t_a + 1
                 expected = td_z_set[t_a]
                 actual = td_z_set[t_b].detach()
                 td_loss = torch.mean((expected - actual)**2 * active_mask)
 
-                r_diffs = torch.mean((reward_predictor(expected) - reward_predictor(actual))**2, dim=1)
+                r_expected = reward_predictor(expected).detach()
+                r_actual = reward_predictor(actual)
+                r_diffs = torch.mean((r_expected - r_actual)**2, dim=1)
                 r_loss = torch.mean(r_diffs * active_mask)
-                ts.collect('TD s {}:{}'.format(t_b, t_a), r_loss)
-                ts.collect('TD r {}:{}'.format(t_b, t_a), td_loss)
                 td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
 
         ts.collect('TD', td_lambda_loss)
@@ -282,13 +284,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         max_a = int(np.argmax(rewards))
         print('Optimal action: {} with reward {:.02f}'.format(max_a, max_r))
 
-        if t == 12:
-            img = rgb_decoder(decoder(z))[0]
-            for _ in range(20):
-                vid.write_frame(img, resize_to=(512,512), caption="Simulation t+0")
-            generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=4, rollout_depth=40)
-            generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=16, rollout_depth=40)
-            generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=64, rollout_depth=40)
+        #generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=4, rollout_depth=40)
 
         # Take the best action, in real life
         new_state, new_reward, done, info = env.step(max_a)
