@@ -185,8 +185,10 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 t_b = t_a + 1
                 expected = td_z_set[t_a]
                 actual = td_z_set[t_b].detach()
-                td_loss = torch.mean((expected - actual)**2)
-                r_loss = torch.mean((reward_predictor(expected) - reward_predictor(actual))**2)
+                td_loss = torch.mean((expected - actual)**2 * active_mask)
+
+                r_diffs = torch.mean((reward_predictor(expected) - reward_predictor(actual))**2, dim=1)
+                r_loss = torch.mean(r_diffs * active_mask)
                 ts.collect('TD s {}:{}'.format(t_b, t_a), r_loss)
                 ts.collect('TD r {}:{}'.format(t_b, t_a), td_loss)
                 td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
@@ -214,7 +216,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         opt_rgb.step()
         # End StarCraft-Specific Hacks
 
-        ts.print_every(2)
+        ts.print_every(10)
     print(ts)
     print('Finished')
 
