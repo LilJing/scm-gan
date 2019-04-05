@@ -95,7 +95,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             torch.save(rgb_decoder.state_dict(), 'model-rgb_decoder.pth')
 
         theta = (train_iter / train_iters)
-        prediction_horizon = 10 + int(10 * theta)
+        prediction_horizon = 5 + int(10 * theta)
 
         train_mode([encoder, decoder, rgb_decoder, transition, discriminator, reward_predictor])
 
@@ -208,14 +208,15 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         # For StarCraftII we use a two-stage decoder
         # The dynamics and planning model operates entirely in pysc2 feature space
         # At the end, we convert features to human-visible RGB
-        opt_rgb.zero_grad()
-        real_rgb = rgb_states[:, 2]
-        simulated_features = decoder(z0).detach()
-        simulated_rgb = rgb_decoder(simulated_features)
-        rgb_loss = torch.mean((real_rgb - simulated_rgb)**2)
-        ts.collect('RGB loss', rgb_loss)
-        rgb_loss.backward()
-        opt_rgb.step()
+        if train_iter % 4 == 0:
+            opt_rgb.zero_grad()
+            real_rgb = rgb_states[:, 2]
+            simulated_features = decoder(z0).detach()
+            simulated_rgb = rgb_decoder(simulated_features)
+            rgb_loss = torch.mean((real_rgb - simulated_rgb)**2)
+            ts.collect('RGB loss', rgb_loss)
+            rgb_loss.backward()
+            opt_rgb.step()
         # End StarCraft-Specific Hacks
 
         ts.print_every(10)
@@ -267,8 +268,8 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     z = encoder(states)
     z = transition(z, onehot(no_op))
 
-    from excitation_bptt import visualize_bptt
-    visualize_bptt(z, transition, reward_predictor, decoder, rgb_decoder, num_actions)
+    #from excitation_bptt import visualize_bptt
+    #visualize_bptt(z, transition, reward_predictor, decoder, rgb_decoder, num_actions)
 
     true_reward = 0
     filename = 'SimpleRolloutAgent-{}.mp4'.format(int(time.time()))
@@ -307,7 +308,10 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
             print('Ending evaluation due to time limit')
             break
     vid.finish()
-    print('Finished with cumulative reward {}'.format(true_reward))
+    msg = 'Finished at t={} with cumulative reward {}'.format(t, true_reward)
+    with open('evaluation_metrics_{}.txt'.format(int(time.time())), 'w') as fp:
+        fp.write(msg + '\n')
+    print(msg)
 
 
 def generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions,
@@ -341,7 +345,7 @@ def onehot(a_idx, num_actions=4):
 
 def compute_rollout_reward(z, transition, reward_predictor, num_actions,
                            selected_action, rollout_width=64, rollout_depth=16,
-                           negative_positive_tradeoff=1.0):
+                           negative_positive_tradeoff=10.0):
     # Initialize a beam
     z = z.repeat(rollout_width, 1, 1, 1)
 
