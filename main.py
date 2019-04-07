@@ -274,7 +274,10 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     true_reward = 0
     filename = 'SimpleRolloutAgent-{}.mp4'.format(int(time.time()))
     vid = imutil.Video(filename, framerate=12)
+    last_bptt = -25
     t = 2
+    humans_killed = 0
+    aliens_killed = 0
     while not done:
         z = z.detach()
         # In simulation, compute all possible futures to select the best action
@@ -283,22 +286,42 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
             z_a = transition(z, onehot(a))
             r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions, a)
             rewards.append(r_a)
-            print('Expected reward from taking action {} is {:.03f}'.format(a, r_a))
+            #print('Expected reward from taking action {} is {:.03f}'.format(a, r_a))
         max_r = max(rewards)
         max_a = int(np.argmax(rewards))
-        print('Optimal action: {} with reward {:.02f}'.format(max_a, max_r))
+        #print('Optimal action: {} with reward {:.02f}'.format(max_a, max_r))
 
-        #generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions, vid=vid, rollout_width=4, rollout_depth=40)
+        '''
+        if t == 20:
+            generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor,
+                                            num_actions, vid=vid, rollout_width=1, rollout_depth=30,
+                                            actions_list = [1, 3, 1, 3, 1] + [3, 3, 3, 1, 3]*5,
+                                            caption_title="Neural Simulation")
+        '''
+
 
         # Take the best action, in real life
         new_state, new_reward, done, info = env.step(max_a)
+        humans_killed -= info['total_damage_taken']
+        aliens_killed += info['enemy_value_killed']
         true_reward += new_reward
 
         # Re-estimate state
         ftr_state, rgb_state = datasource.convert_frame(new_state)
-        caption = 't={} cumulative r={} est. future r={}'.format(t, true_reward, max_r)
+        #caption = 't={} curr. r={:.02f} future r: {:.02f} {:.02f} {:.02f} {:.02f}'.format(t, true_reward, rewards[0], rewards[1], rewards[2], rewards[3])
+        caption = 'HUMANS DESTROYED: {}    ALIENS DESTROYED: {}'.format(int(humans_killed), int(aliens_killed))
         print(caption)
         vid.write_frame(rgb_state, resize_to=(512,512), caption=caption)
+        imutil.show(rgb_state, resize_to=(512,512), caption=caption, save=False)
+
+        # Decision to shoot
+        if max_a == 1 and last_bptt + 50 < t:
+            caption = "Recommended action: FIRE, expected reward: {:.02f}".format(float(max_r))
+            for _ in range(10):
+                vid.write_frame(rgb_state, resize_to=(512,512), caption=caption)
+            from excitation_bptt import visualize_bptt
+            visualize_bptt(z, transition, reward_predictor, decoder, rgb_decoder, num_actions, vid)
+            last_bptt = t
 
         state_list = state_list[1:] + [ftr_state]
         z = encoder(torch.Tensor(state_list).unsqueeze(0))
@@ -314,10 +337,15 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     print(msg)
 
 
-def generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor, num_actions,
-                                    vid=None, rollout_width=64, rollout_depth=20):
-    actions = np.random.randint(num_actions, size=(rollout_width, rollout_depth))
+def generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_predictor,
+                                    num_actions, vid=None, rollout_width=64, rollout_depth=20,
+                                    caption_title="Neural Simulation", actions_list=None):
+    if actions_list:
+        actions = np.array([actions_list] * rollout_width)
+    else:
+        actions = np.random.randint(num_actions, size=(rollout_width, rollout_depth))
     cumulative_rewards = torch.zeros(rollout_width).cuda()
+    frames = []
     z = z.repeat(rollout_width, 1, 1, 1)
     for t in range(rollout_depth):
         z = transition(z, onehot(actions[:, t]))
@@ -329,8 +357,13 @@ def generate_planning_visualization(z, transition, decoder, rgb_decoder, reward_
         mask = torch.clamp(mask, 0, 1)
         mask = mask.reshape(-1, 1, 1, 1)
         best_score = float(torch.max(cumulative_rewards))
-        caption = "Simulation t={} best score: {:.2f}".format(t, best_score)
-        vid.write_frame(img * mask, resize_to=(512,512), caption=caption)
+        caption = "{} t+{} R={:.2f}".format(caption_title, t, best_score)
+        img = img * mask
+        vid.write_frame(img, resize_to=(512,512), caption=caption)
+        frames.append(img)
+    for img in frames[::-1]:
+        vid.write_frame(img, resize_to=(512,512), caption=caption_title)
+
     r_max, r_argmax = cumulative_rewards.max(), cumulative_rewards.argmax()
     print('Simulation {} reward: {:.2f}'.format(r_argmax, r_max))
 
@@ -373,7 +406,7 @@ def compute_rollout_reward(z, transition, reward_predictor, num_actions,
 
     # Average among the rollouts
     max_r, max_idx = cumulative_reward.sum(dim=1).max(dim=0)
-    print('Best possible reward {:.2f} from rollout: {}'.format(max_r, actions[max_idx, :3]))
+    #print('Best possible reward {:.2f} from rollout: {}'.format(max_r, actions[max_idx, :3]))
     return max_r
 
 
