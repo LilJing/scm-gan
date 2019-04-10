@@ -26,6 +26,7 @@ parser = argparse.ArgumentParser(description="Learn to model a sequential enviro
 parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-v0, etc (see envs/ for list)')
 parser.add_argument('--load-from', required=True, help='Directory containing .pth models (default: .)')
 parser.add_argument('--evaluate', action='store_true', help='If true, evaluate instead of training')
+parser.add_argument('--evaluations', type=int, default=1, help='Integer number of evaluations to run')
 args = parser.parse_args()
 
 
@@ -62,8 +63,9 @@ def main():
         rgb_decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-rgb_decoder.pth')))
 
     if args.evaluate:
-        play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
-             reward_predictor, discriminator, rgb_decoder, transition)
+        for _ in range(args.evaluations):
+            play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
+                 reward_predictor, discriminator, rgb_decoder, transition)
     else:
         train(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
               reward_predictor, discriminator, rgb_decoder, transition)
@@ -308,13 +310,14 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
 
         # Re-estimate state
         ftr_state, rgb_state = datasource.convert_frame(new_state)
-        #caption = 't={} curr. r={:.02f} future r: {:.02f} {:.02f} {:.02f} {:.02f}'.format(t, true_reward, rewards[0], rewards[1], rewards[2], rewards[3])
+        print('t={} curr. r={:.02f} future r: {:.02f} {:.02f} {:.02f} {:.02f}'.format(t, true_reward, rewards[0], rewards[1], rewards[2], rewards[3]))
         caption = 'HUMANS DESTROYED: {}    ALIENS DESTROYED: {}'.format(int(humans_killed), int(aliens_killed))
         print(caption)
         vid.write_frame(rgb_state, resize_to=(512,512), caption=caption)
         imutil.show(rgb_state, resize_to=(512,512), caption=caption, save=False)
 
         # Decision to shoot
+        '''
         if max_a == 1 and last_bptt + 50 < t:
             caption = "Recommended action: FIRE, expected reward: {:.02f}".format(float(max_r))
             for _ in range(10):
@@ -322,6 +325,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
             from excitation_bptt import visualize_bptt
             visualize_bptt(z, transition, reward_predictor, decoder, rgb_decoder, num_actions, vid)
             last_bptt = t
+        '''
 
         state_list = state_list[1:] + [ftr_state]
         z = encoder(torch.Tensor(state_list).unsqueeze(0))
