@@ -15,6 +15,8 @@ MAX_EPISODES_PER_ENVIRONMENT = 500
 BURN_STATES_BEFORE_START = 50
 ENV_NAME = 'SpaceInvadersDeterministic-v4'
 NUM_ACTIONS = 6
+NUM_REWARDS = 1
+RGB_SIZE = 64
 
 replay_buffer = []
 initialized = False
@@ -57,7 +59,7 @@ def play_episode(env, policy):
     state = env.reset()
     for _ in range(BURN_STATES_BEFORE_START):
         state, _, _, _ = env.step(action=0)
-    reward = 0
+    reward = [0]
     done = False
     while True:
         action = policy(state)
@@ -70,6 +72,7 @@ def play_episode(env, policy):
         if done:
             break
         state, reward, done, info = env.step(action)
+        reward = [reward]
     trajectory = (np.array(states), np.array(rewards), np.array(actions))
     add_to_replay_buffer(trajectory)
 
@@ -117,7 +120,12 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
         rewards_batch.append(np.array(rewards))
         dones_batch.append(np.array(dones))
         actions_batch.append(np.array(actions))
-    return np.array(states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
+    states = np.array(states_batch)
+    rgb_states = states
+    rewards = np.array(rewards_batch)
+    dones = np.array(dones_batch)
+    actions = np.array(actions_batch)
+    return states, rgb_states, rewards, dones, actions
 
 
 def convert_atari_frame(state, width=64, height=64):
