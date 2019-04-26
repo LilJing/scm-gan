@@ -17,6 +17,7 @@ MAX_EPISODES_PER_ENVIRONMENT = 500
 NUM_ACTIONS = 4
 NUM_REWARDS = 2
 NO_OP_ACTION = 0
+RGB_SIZE = 256
 
 replay_buffer = []
 initialized = False
@@ -136,7 +137,7 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
         rewards_batch.append(np.array(rewards))
         dones_batch.append(np.array(dones))
         actions_batch.append(np.array(actions))
-    return np.array(states_batch), np.array(rgb_states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
+    return np.array(rgb_states_batch), np.array(rgb_states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
 
 
 def convert_frame(state, width=64, height=64):
