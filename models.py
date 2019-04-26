@@ -13,11 +13,13 @@ from logutil import TimeSeries
 from tqdm import tqdm
 from spatial_recurrent import CSRN
 from coordconv import CoordConv2d
+from spectral_normalization import SpectralNorm
 
 INPUT_FRAMES = 3
-COLOR_CHANNELS = 4
+COLOR_CHANNELS = 3
 INPUT_CHANNELS = COLOR_CHANNELS * INPUT_FRAMES
 
+ts = TimeSeries('Profiling')
 
 class Transition(nn.Module):
     def __init__(self, latent_size, num_actions):
@@ -27,16 +29,16 @@ class Transition(nn.Module):
         self.latent_size = latent_size
 
         # Skip connections from output of 1 to input of 6, and output of 2 to input of 5
-        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 32, (4,4), stride=2, padding=1))
-        self.conv2 = SpectralNorm(nn.Conv2d(32, 64, (4,4), stride=2, padding=1))
-        self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (4,4), stride=2, padding=1))
-
-        self.conv4 = SpectralNorm(nn.ConvTranspose2d(64, 64, (4,4), stride=2, padding=1))
-        self.conv5 = SpectralNorm(nn.ConvTranspose2d(64 + 64, 32, (4,4), stride=2, padding=1))
-        self.conv6 = nn.ConvTranspose2d(32 + 32, latent_size, (4,4), stride=2, padding=1)
+        self.conv1 = (nn.Conv2d(latent_size + num_actions, 16, (4,4), stride=2, padding=1))
+        self.conv2 = (nn.Conv2d(16, 32, (4,4), stride=2, padding=1))
+        #self.conv3 = (nn.Conv2d(32, 64, (4,4), stride=2, padding=1))
+        #self.conv4 = (nn.ConvTranspose2d(64, 32, (4,4), stride=2, padding=1))
+        self.conv5 = (nn.ConvTranspose2d(32, 16, (4,4), stride=2, padding=1))
+        self.conv6 = nn.ConvTranspose2d(16 + 16, latent_size, (4,4), stride=2, padding=1)
         self.cuda()
 
     def forward(self, z_map, actions):
+        start_time = time.time()
         batch_size, z, height, width = z_map.shape
         batch_size_actions, num_actions = actions.shape
         assert batch_size == batch_size_actions
@@ -54,22 +56,24 @@ class Transition(nn.Module):
 
         x = self.conv2(x)
         x = F.leaky_relu(x)
-        skip2 = x.clone()
+        #skip2 = x.clone()
 
-        x = self.conv3(x)
-        x = F.leaky_relu(x)
+        #x = self.conv3(x)
+        #x = F.leaky_relu(x)
 
         # Convolve back up, using saved skips
-        x = self.conv4(x)
-        x = F.leaky_relu(x)
+        #x = self.conv4(x)
+        #x = F.leaky_relu(x)
 
-        x = torch.cat([x, skip2], dim=1)
+        #x = torch.cat([x, skip2], dim=1)
         x = self.conv5(x)
         x = F.leaky_relu(x)
 
         x = torch.cat([x, skip1], dim=1)
         x = self.conv6(x)
         x = torch.sigmoid(x)
+        ts.collect('Transition', time.time() - start_time)
+        ts.print_every(10)
         return x
 
 
@@ -90,6 +94,7 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         # Input: B x 1 x 64 x 64
+        start_time = time.time()
         batch_size, frames, channels, height, width = x.shape
         x = x.view(batch_size, frames*channels, height, width)
 
@@ -104,10 +109,10 @@ class Encoder(nn.Module):
 
         x = self.conv4(x)
         x = torch.sigmoid(x)
+        ts.collect('Encoder', time.time() - start_time)
         return x
 
 
-from spectral_normalization import SpectralNorm
 class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
@@ -142,19 +147,16 @@ class RewardPredictor(nn.Module):
     # Predicts multiple reward types, if you have multiple reward signals
     def __init__(self, latent_dim, num_rewards):
         super().__init__()
-        self.conv1 = nn.Conv2d(latent_dim, 64, (3,3), stride=1, padding=0)
-        self.conv2 = nn.Conv2d(64, 32, (3,3), stride=1, padding=0)
-
+        self.conv1 = nn.Conv2d(latent_dim, 32, (3,3), stride=1, padding=0)
         # Each reward is discretized into a 3-way classification: +1, -1, or 0
-        self.conv3 = nn.Conv2d(32, num_rewards * 3, (3,3), stride=2, padding=0)
+        self.conv2 = nn.Conv2d(32, num_rewards * 3, (3,3), stride=2, padding=0)
         self.cuda()
 
     def forward(self, x, visualize=False):
+        start_time = time.time()
         x = self.conv1(x)
         x = F.leaky_relu(x)
         x = self.conv2(x)
-        x = F.leaky_relu(x)
-        x = self.conv3(x)
 
         # Classify each pixel as +1, -1, or 0 (for each reward type)
         batch_size, channels, height, width = x.shape
@@ -162,6 +164,7 @@ class RewardPredictor(nn.Module):
         x = torch.softmax(x, dim=1)
         # Return the cumulative reward (for each reward type)
         x = x[:, 0] - x[:, 2]
+        ts.collect('RPred', time.time() - start_time)
         if visualize:
             return x.sum(-1).sum(-1), x
         return x.sum(-1).sum(-1)
@@ -183,6 +186,7 @@ class Decoder(nn.Module):
         self.cuda()
 
     def forward(self, z_map, visualize=False):
+        start_time = time.time()
         batch_size, latent_size, height, width = z_map.shape
 
         x = self.conv1(z_map)
@@ -199,6 +203,7 @@ class Decoder(nn.Module):
             visualization = x[0]
             #imutil.show(x[0], img_padding=8, save=False, display=False, return_pixels=True)
         x = torch.sum(x, dim=1)
+        ts.collect('Decoder', time.time() - start_time)
         if visualize:
             return x, visualization
         return x
@@ -207,18 +212,19 @@ class Decoder(nn.Module):
 class RGBDecoder(nn.Module):
     def __init__(self, img_size=256):
         super().__init__()
-        self.conv1 = nn.ConvTranspose2d(COLOR_CHANNELS, 32, (4,4), stride=2, padding=1)
-        self.conv2 = nn.ConvTranspose2d(32, 3, (4,4), stride=2, padding=1)
+        #self.conv1 = nn.ConvTranspose2d(COLOR_CHANNELS, 32, (4,4), stride=2, padding=1)
+        #self.conv2 = nn.ConvTranspose2d(32, 3, (4,4), stride=2, padding=1)
         self.bg = nn.Parameter(torch.zeros((3, img_size, img_size)).cuda())
-        self.cuda()
+        #self.cuda()
 
     def forward(self, x, enable_bg=True):
-        x = self.conv1(x)
-        x = F.leaky_relu(x)
-        x = self.conv2(x)
+        #x = self.conv1(x)
+        #x = F.leaky_relu(x)
+        #x = self.conv2(x)
         if enable_bg:
             x = x + self.bg
-        x = torch.sigmoid(x)
+        #x = torch.sigmoid(x)
+        #return x
         return x
 
 

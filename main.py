@@ -49,7 +49,7 @@ def main():
     decoder = nn.DataParallel(models.Decoder(latent_dim))
     reward_predictor = nn.DataParallel(models.RewardPredictor(latent_dim, num_rewards))
     discriminator = nn.DataParallel(models.Discriminator())
-    rgb_decoder = nn.DataParallel(models.RGBDecoder())
+    rgb_decoder = nn.DataParallel(models.RGBDecoder(img_size=datasource.RGB_SIZE))
     transition = nn.DataParallel(models.Transition(latent_dim, num_actions))
 
     load_from_dir = args.load_from or '.'
@@ -82,9 +82,9 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.001)
     opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.001)
     opt_rgb = torch.optim.Adam(rgb_decoder.parameters(), lr=.01)
-    ts = TimeSeries('Training Model', train_iters, tensorboard=True)
+    ts = TimeSeries('Training Model', train_iters, tensorboard=False)
 
-    for train_iter in range(1, train_iters):
+    for train_iter in range(0, train_iters):
         if train_iter % 1000 == 0:
             print('Evaluating networks...')
             evaluate(datasource, encoder, decoder, rgb_decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=train_iter)
@@ -109,7 +109,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
         states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size, prediction_horizon)
         states = torch.Tensor(states).cuda()
-        rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
+        #rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
+        rgb_states = torch.Tensor(rgb_states).cuda()
         rewards = torch.Tensor(rewards).cuda()
         dones = torch.Tensor(dones.astype(int)).cuda()
 
@@ -206,6 +207,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         opt_trans.step()
         opt_pred.step()
 
+        """
         # Begin StarCraft-Specific Hacks
         # For StarCraftII we use a two-stage decoder
         # The dynamics and planning model operates entirely in pysc2 feature space
@@ -219,6 +221,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             ts.collect('RGB loss', rgb_loss)
             rgb_loss.backward()
             opt_rgb.step()
+        """
         # End StarCraft-Specific Hacks
 
         ts.print_every(10)
@@ -520,7 +523,8 @@ def visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transiti
     batch_size = 1
     states, rgb_states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps, random_start=False)
     states = torch.Tensor(states).cuda()
-    rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
+    #rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
+    rgb_states = torch.Tensor(rgb_states).cuda()
     rewards = torch.Tensor(rewards).cuda()
     actions = torch.LongTensor(actions).cuda()
     offsets = [1, 3, 5]
@@ -639,15 +643,16 @@ def visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, tran
     rgb_vid = imutil.Video('simulation_rgb_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     ftr_vid = imutil.Video('simulation_ftr_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     factor_vids = []
-    for i in range(num_factors):
-        factor_filename = 'factor_videos/separable_factor_{:03d}_iter_{:06d}.mp4'.format(i, train_iter)
-        factor_vids.append(imutil.Video(factor_filename, framerate=3))
+    #for i in range(num_factors):
+    #    factor_filename = 'factor_videos/separable_factor_{:03d}_iter_{:06d}.mp4'.format(i, train_iter)
+    #    factor_vids.append(imutil.Video(factor_filename, framerate=3))
 
     # First: replay in simulation the true trajectory
     caption = 'Real'
     simulate_trajectory_from_actions(z.clone(), decoder, rgb_decoder, reward_pred, transition,
                                     states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid,
-                                    factor_vids, caption_tag=caption, num_rewards=num_rewards)
+                                    factor_vids, caption_tag=caption, num_rewards=num_rewards,
+                                    num_actions=num_actions)
 
     for vid in factor_vids:
         vid.finish()
@@ -683,9 +688,9 @@ def simulate_trajectory_from_actions(z, decoder, rgb_decoder, reward_pred, trans
 
         # Visualize each separate factor
         num_factors, num_features, height, width = x_t_separable.shape
-        for z_i in range(num_factors):
-            factor_vis = rgb_decoder(x_t_separable[z_i].unsqueeze(0), enable_bg=False)
-            factor_vids[z_i].write_frame(factor_vis * 255, normalize=False)
+        #for z_i in range(num_factors):
+        #    factor_vis = rgb_decoder(x_t_separable[z_i].unsqueeze(0), enable_bg=False)
+        #    factor_vids[z_i].write_frame(factor_vis * 255, normalize=False)
 
         # Predict the next latent point
         onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
