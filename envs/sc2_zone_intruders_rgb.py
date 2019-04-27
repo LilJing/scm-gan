@@ -17,7 +17,7 @@ MAX_EPISODES_PER_ENVIRONMENT = 500
 NUM_ACTIONS = 4
 NUM_REWARDS = 2
 NO_OP_ACTION = 0
-RGB_SIZE = 256
+RGB_SIZE = 64
 
 replay_buffer = []
 initialized = False
@@ -31,7 +31,7 @@ def init():
     global env
     global initialized
     global sim_thread
-    env = ZoneIntrudersEnvironment()
+    env = ZoneIntrudersEnvironment(screen_size=RGB_SIZE)
     sim_thread = Thread(target=play_game_thread)
     sim_thread.daemon = True  # hack to kill on ctrl+C
     sim_thread.start()
@@ -140,7 +140,7 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
     return np.array(rgb_states_batch), np.array(rgb_states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
 
 
-def convert_frame(state, width=64, height=64):
+def convert_frame(state, width=RGB_SIZE, height=RGB_SIZE):
     feature_map, feature_screen, rgb_map, rgb_screen = state
     rgb_screen = rgb_screen.transpose(2, 0, 1)
     return feature_screen, rgb_screen / 255.

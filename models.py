@@ -15,11 +15,18 @@ from spatial_recurrent import CSRN
 from coordconv import CoordConv2d
 from spectral_normalization import SpectralNorm
 
+NOISE_DIM = 3
 INPUT_FRAMES = 3
 COLOR_CHANNELS = 3
 INPUT_CHANNELS = COLOR_CHANNELS * INPUT_FRAMES
 
 ts = TimeSeries('Profiling')
+
+
+def random_eps(p=0.5, batch_size=32, height=64, width=64, channels=NOISE_DIM):
+    shape = (batch_size, height, width, channels)
+    return torch.bernoulli(torch.ones(shape) * p)
+
 
 class Transition(nn.Module):
     def __init__(self, latent_size, num_actions):
@@ -37,19 +44,27 @@ class Transition(nn.Module):
         self.conv6 = nn.ConvTranspose2d(16 + 16, latent_size, (4,4), stride=2, padding=1)
         self.cuda()
 
-    def forward(self, z_map, actions):
+    def forward(self, s, a, eps=None):
         start_time = time.time()
+
+        actions = a
+        z_map = s
         batch_size, z, height, width = z_map.shape
         batch_size_actions, num_actions = actions.shape
         assert batch_size == batch_size_actions
 
-        # First, broadcast the actions across the map
-        # Then apply the next-frame prediction CNN
+        if eps is None:
+            eps = random_eps(batch_size=batch_size)
+        assert len(eps) == batch_size
+
+        # Broadcast the actions across the convolutional map
         actions = actions.unsqueeze(-1).unsqueeze(-1)
         actions = actions.repeat(1, 1, height, width)
 
-        # Convolve down, saving skips
-        x = torch.cat([z_map, actions], dim=1)
+        # Stack the latent values, the actions, and random chance
+        x = torch.cat([z_map, actions, eps], dim=1)
+
+        # Convolve down, saving skip activations like U-net
         x = self.conv1(x)
         x = F.leaky_relu(x)
         skip1 = x.clone()
@@ -113,18 +128,52 @@ class Encoder(nn.Module):
         return x
 
 
+# The world is deterministic and completely predictable
+# However, one of the inputs to the world is a map of random values
+# The random values have two properties:
+#     1. They are impossible to guess beforehand
+#     2. It is obvious what their value was, after the fact
+# The discriminator solves #1 and this network solves #2
+#
+class Inverter(nn.Module):
+    def __init__(self, latent_size):
+        super().__init__()
+        self.latent_size = latent_size
+        self.conv1 = nn.Conv2d(latent_size * 2, 32, (3,3), stride=1, padding=1)
+        self.conv2 = SpectralNorm(nn.Conv2d(32, NOISE_DIM, (3,3), stride=1, padding=0))
+
+        # Bxlatent_size
+        self.cuda()
+
+    # Given s_{t-1}, s_t, a_{t}, infer \epsilon_{t-1}
+    def forward(self, s_curr, s_next, a):
+        # Input: B x 1 x 64 x 64
+        start_time = time.time()
+        batch_size, frames, channels, height, width = x.shape
+        x = x.view(batch_size, frames*channels, height, width)
+
+        x = self.conv1(x)
+        x = F.leaky_relu(x)
+
+        x = self.conv2(x)
+        x = torch.sigmoid(x)
+        ts.collect('NoiseRecognizer', time.time() - start_time)
+        return x
+
+
+# Input: A noise map, either output by the NoiseRecognizer or drawn from the noise prior
+# Output: Linear unit for a binary classification, random or not random
 class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
         # Bx1x64x64
-        self.conv1 = SpectralNorm(nn.Conv2d(3, 32, 1, stride=1, padding=0))
-        #self.bn_conv1 = nn.BatchNorm2d(32)
-        # Bx8x32x32
-        self.conv2 = SpectralNorm(nn.Conv2d(32, 32, 1, stride=1, padding=0))
-        #self.bn_conv2 = nn.BatchNorm2d(32)
+        self.conv1 = SpectralNorm(nn.Conv2d(NOISE_DIM, 32, (3, 3), stride=2, padding=0))
+        # Bx32x32x32
+        self.conv2 = SpectralNorm(nn.Conv2d(32, 32, (3, 3), stride=2, padding=0))
+        # Bx32x16x16
+        self.conv3 = nn.Conv2d(32, 32, (3,3), stride=2, padding=0)
 
-        self.conv3 = nn.Conv2d(32, 1, 3, padding=1)
-
+        self.fc1 = nn.Linear(32*7*7, 1)
         self.cuda()
 
     def forward(self, x):
@@ -132,15 +181,17 @@ class Discriminator(nn.Module):
         batch_size, channels, height, width = x.shape
 
         x = self.conv1(x)
-        #x = self.bn_conv1(x)
         x = F.leaky_relu(x)
 
         x = self.conv2(x)
-        #x = self.bn_conv2(x)
         x = F.leaky_relu(x)
 
         x = self.conv3(x)
-        return x.sum(dim=-1).sum(dim=-1).sum(dim=-1)
+        x = F.leaky_relu(x)
+
+        x = self.fc1(x)
+        x = F.leaky_relu(x)
+        return x
 
 
 class RewardPredictor(nn.Module):
