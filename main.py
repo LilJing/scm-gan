@@ -77,7 +77,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.001)
     ts = TimeSeries('Training Model', train_iters, tensorboard=False)
 
-    for train_iter in range(0, train_iters):
+    for train_iter in range(1, train_iters):
         if train_iter % 1000 == 0:
             print('Evaluating networks...')
             evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=train_iter)
@@ -137,7 +137,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             # Reconstruction loss
             expected = states[:, t]
             predicted = decoder(z)
-            rec_loss = torch.mean((expected - predicted) **2)
+            rec_loss_batch = ((expected - predicted)**2).mean(-1).mean(-1).mean(-1)
+            rec_loss = torch.mean(rec_loss_batch * active_mask)
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
 
@@ -182,7 +183,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 t_b = t_a + 1
                 expected = td_z_set[t_a]
                 actual = td_z_set[t_b].detach()
-                td_loss = torch.mean((expected - actual)**2 * active_mask)
+                td_loss_batch = ((expected - actual)**2).mean(-1).mean(-1).mean(-1)
+                td_loss = torch.mean(td_loss_batch * active_mask)
 
                 r_expected = reward_predictor(expected).detach()
                 r_actual = reward_predictor(actual)
