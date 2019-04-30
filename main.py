@@ -129,7 +129,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             actual_reward = rewards[:, t]
             reward_difference = torch.mean(torch.mean((expected_reward - actual_reward)**2, dim=1) * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += .01 * reward_difference
+            loss += .001 * reward_difference
 
             # Reconstruction loss
             expected = states[:, t]
@@ -207,20 +207,9 @@ def evaluate(datasource, encoder, decoder, transition, discriminator, reward_pre
     print('Evaluating networks...')
     test_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
-    # Run visualizations
-    #est_reward = format_reward_vector(reward_predictor(z0)[0])
-    #caption = 'Left: Input, Right: Generated. iter: {:06d} R: {}'.format(train_iter, est_reward)
-    #pixels = torch.cat([expected[0], actual[0]], dim=-1)
-    #filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
-    #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
-
     measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
     visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
     visualize_reconstruction(datasource, encoder, decoder, transition, reward_predictor, train_iter=train_iter)
-
-    # Periodically compute expensive metrics
-    #if hasattr(datasource, 'simulator'):
-    #    disentanglement_score = higgins_metric_conv(datasource.simulator, datasource.TRUE_LATENT_DIM, encoder, latent_dim)
 
 
 # Apply a simple model-predictive control algorithm using the learned model,
@@ -234,26 +223,21 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     # No-op through the first 3 frames for initial state estimation
     state = env.reset()
     no_op = 3
-    s_0, srgb_0 = datasource.convert_frame(state)
+    s_0 = datasource.convert_frame(state)
     state, reward, done, info = env.step(no_op)
-    s_1, srgb_1 = datasource.convert_frame(state)
+    s_1 = datasource.convert_frame(state)
     state, reward, done, info = env.step(no_op)
-    s_2, srgb_2 = datasource.convert_frame(state)
+    s_2 = datasource.convert_frame(state)
     state_list = [s_0, s_1, s_2]
-    rgb_states = np.array([srgb_0, srgb_1, srgb_2])
 
     # Estimate initial state (given t=0,1,2 estimate state at t=2)
     states = torch.Tensor(state_list).unsqueeze(0)
     z = encoder(states)
     z = transition(z, onehot(no_op))
 
-    #from excitation_bptt import visualize_bptt
-    #visualize_bptt(z, transition, reward_predictor, decoder, num_actions)
-
     true_reward = 0
     filename = 'SimpleRolloutAgent-{}.mp4'.format(int(time.time()))
     vid = imutil.Video(filename, framerate=12)
-    last_bptt = -25
     t = 2
     humans_killed = 0
     aliens_killed = 0
@@ -286,23 +270,11 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         true_reward += new_reward
 
         # Re-estimate state
-        ftr_state, rgb_state = datasource.convert_frame(new_state)
+        ftr_state = datasource.convert_frame(new_state)
         print('t={} curr. r={:.02f} future r: {:.02f} {:.02f} {:.02f} {:.02f}'.format(t, true_reward, rewards[0], rewards[1], rewards[2], rewards[3]))
         caption = 'HUMANS DESTROYED: {}    ALIENS DESTROYED: {}'.format(int(humans_killed), int(aliens_killed))
         print(caption)
-        vid.write_frame(rgb_state, resize_to=(512,512), caption=caption)
-        imutil.show(rgb_state, resize_to=(512,512), caption=caption, save=False)
-
-        # Decision to shoot
-        '''
-        if max_a == 1 and last_bptt + 50 < t:
-            caption = "Recommended action: FIRE, expected reward: {:.02f}".format(float(max_r))
-            for _ in range(10):
-                vid.write_frame(rgb_state, resize_to=(512,512), caption=caption)
-            from excitation_bptt import visualize_bptt
-            visualize_bptt(z, transition, reward_predictor, decoder, num_actions, vid)
-            last_bptt = t
-        '''
+        vid.write_frame(ftr_state, resize_to=(512,512), caption=caption)
 
         state_list = state_list[1:] + [ftr_state]
         z = encoder(torch.Tensor(state_list).unsqueeze(0))
