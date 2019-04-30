@@ -17,6 +17,7 @@ MAX_EPISODES_PER_ENVIRONMENT = 500
 NUM_ACTIONS = 4
 NUM_REWARDS = 2
 NO_OP_ACTION = 0
+RGB_SIZE = 256
 
 replay_buffer = []
 initialized = False
@@ -131,6 +132,7 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
             dones.extend([False for _ in range(duration - 1)] + [True])
             timesteps_remaining -= duration
 
+        # feature_map, rgb_map, reward_vec, done_vec, actions_vec
         states_batch.append(np.array(states))  # BHWC
         rgb_states_batch.append(np.array(rgb_states))
         rewards_batch.append(np.array(rewards))

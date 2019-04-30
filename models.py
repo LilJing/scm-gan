@@ -25,7 +25,7 @@ ts = TimeSeries('Profiling')
 
 def random_eps(p=0.5, batch_size=32, height=64, width=64, channels=NOISE_DIM):
     shape = (batch_size, height, width, channels)
-    return torch.bernoulli(torch.ones(shape) * p)
+    return torch.bernoulli(torch.ones(shape) * p).cuda()
 
 
 class Transition(nn.Module):
@@ -62,7 +62,7 @@ class Transition(nn.Module):
         actions = actions.repeat(1, 1, height, width)
 
         # Stack the latent values, the actions, and random chance
-        x = torch.cat([z_map, actions, eps], dim=1)
+        x = torch.cat([z_map, actions], dim=1)
 
         # Convolve down, saving skip activations like U-net
         x = self.conv1(x)
@@ -272,8 +272,8 @@ class RGBDecoder(nn.Module):
         #x = self.conv1(x)
         #x = F.leaky_relu(x)
         #x = self.conv2(x)
-        if enable_bg:
-            x = x + self.bg
+        #if enable_bg:
+        #    x = x + self.bg
         #x = torch.sigmoid(x)
         #return x
         return x

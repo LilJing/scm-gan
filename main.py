@@ -16,6 +16,7 @@ import imutil
 from logutil import TimeSeries
 
 import models
+from datasource import allocate_datasource
 from causal_graph import render_causal_graph
 from higgins import higgins_metric_conv
 from utils import cov
@@ -30,19 +31,10 @@ parser.add_argument('--evaluations', type=int, default=1, help='Integer number o
 args = parser.parse_args()
 
 
-def select_environment(env_name):
-    if env_name.endswith('v0') or env_name.endswith('v4'):
-        datasource = import_module('envs.gym_make')
-        datasource.ENV_NAME = env_name
-    else:
-        datasource = import_module('envs.' + env_name)
-    return datasource
-
-
 def main():
     latent_dim = 16
 
-    datasource = select_environment(args.env)
+    datasource = allocate_datasource(args.env)
     num_actions = datasource.NUM_ACTIONS
     num_rewards = datasource.NUM_REWARDS
     encoder = nn.DataParallel(models.Encoder(latent_dim))

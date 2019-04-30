@@ -13,6 +13,8 @@ PADDLE_HEIGHT = 8
 BALL_RADIUS = 2
 NUM_ACTIONS = 4
 TRUE_LATENT_DIM = 6
+NUM_REWARDS = 1
+RGB_SIZE = GAME_SIZE
 
 MARGIN_Y = 4
 MARGIN_X = 5
@@ -116,6 +118,7 @@ def get_trajectories(batch_size=32, timesteps=10, policy='random', random_start=
     actions = np.random.randint(envs.action_space.n, size=(batch_size,))
     for t in range(timesteps):
         states, rewards, dones, _ = envs.step(actions)
+        rewards = [rewards]
         if policy == 'random':
             actions = np.random.randint(envs.action_space.n, size=(batch_size,))
         if policy == 'repeat':
