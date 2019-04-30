@@ -16,9 +16,7 @@ from coordconv import CoordConv2d
 from spectral_normalization import SpectralNorm
 
 NOISE_DIM = 3
-INPUT_FRAMES = 3
-COLOR_CHANNELS = 3
-INPUT_CHANNELS = COLOR_CHANNELS * INPUT_FRAMES
+ENCODER_INPUT_FRAMES = 3
 
 ts = TimeSeries('Profiling')
 
@@ -93,16 +91,17 @@ class Transition(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, latent_size):
+    def __init__(self, latent_size, color_channels):
         super().__init__()
         self.latent_size = latent_size
+        self.color_channels = color_channels
         # Bx1x64x64
-        self.conv1 = nn.Conv2d(INPUT_CHANNELS, 64, (5,5), stride=1, padding=2)
+        self.conv1 = nn.Conv2d(color_channels * ENCODER_INPUT_FRAMES, 64, (3,3), stride=1, padding=1)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
         self.conv2 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=1, padding=1))
-        self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (5,5), stride=2, padding=2))
-        self.conv4 = nn.Conv2d(64, latent_size, (5,5), stride=1, padding=2)
+        self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=2, padding=1))
+        self.conv4 = nn.Conv2d(64, latent_size, (3,3), stride=1, padding=1)
 
         # Bxlatent_size
         self.cuda()
@@ -116,8 +115,8 @@ class Encoder(nn.Module):
         x = self.conv1(x)
         x = F.leaky_relu(x)
 
-        x = self.conv2(x)
-        x = F.leaky_relu(x)
+        #x = self.conv2(x)
+        #x = F.leaky_relu(x)
 
         x = self.conv3(x)
         x = F.leaky_relu(x)
@@ -222,17 +221,20 @@ class RewardPredictor(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, latent_size):
+    def __init__(self, latent_size, color_channels):
         super().__init__()
         self.latent_size = latent_size
+        self.color_channels = color_channels
 
         # Bx1x64x64
         self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (4,4),
                         stride=2, padding=1, groups=latent_size, bias=False)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.ConvTranspose2d(latent_size*4, latent_size*COLOR_CHANNELS, (3,3),
-                        stride=1, padding=1, groups=latent_size, bias=False)
+        self.conv2 = nn.ConvTranspose2d(latent_size * 4,
+                                        latent_size*self.color_channels, (3,3),
+                                        stride=1, padding=1,
+                                        groups=latent_size, bias=False)
         #self.bg = nn.Parameter(torch.zeros((3, IMG_SIZE, IMG_SIZE)).cuda())
         self.cuda()
 
@@ -246,7 +248,7 @@ class Decoder(nn.Module):
 
         x = self.conv2(x)
         # Sum the separate items
-        x = x.view(batch_size, latent_size, COLOR_CHANNELS, height*2, width*2)
+        x = x.view(batch_size, latent_size, self.color_channels, height*2, width*2)
 
         # Optional: Learn to subtract static background, separate from objects
         #x = x + self.bg
@@ -261,11 +263,11 @@ class Decoder(nn.Module):
 
 
 class RGBDecoder(nn.Module):
-    def __init__(self, img_size=256):
+    def __init__(self, color_channels=3, img_size=256):
         super().__init__()
-        #self.conv1 = nn.ConvTranspose2d(COLOR_CHANNELS, 32, (4,4), stride=2, padding=1)
+        #self.conv1 = nn.ConvTranspose2d(color_channels, 32, (4,4), stride=2, padding=1)
         #self.conv2 = nn.ConvTranspose2d(32, 3, (4,4), stride=2, padding=1)
-        self.bg = nn.Parameter(torch.zeros((3, img_size, img_size)).cuda())
+        self.bg = nn.Parameter(torch.zeros((color_channels, img_size, img_size)).cuda())
         #self.cuda()
 
     def forward(self, x, enable_bg=True):

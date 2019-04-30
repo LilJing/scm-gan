@@ -1,5 +1,4 @@
 import argparse
-from importlib import import_module
 
 import time
 import math
@@ -37,12 +36,13 @@ def main():
     datasource = allocate_datasource(args.env)
     num_actions = datasource.NUM_ACTIONS
     num_rewards = datasource.NUM_REWARDS
-    encoder = nn.DataParallel(models.Encoder(latent_dim))
-    decoder = nn.DataParallel(models.Decoder(latent_dim))
-    reward_predictor = nn.DataParallel(models.RewardPredictor(latent_dim, num_rewards))
-    discriminator = nn.DataParallel(models.Discriminator())
-    rgb_decoder = nn.DataParallel(models.RGBDecoder(img_size=datasource.RGB_SIZE))
-    transition = nn.DataParallel(models.Transition(latent_dim, num_actions))
+    color_channels = datasource.COLOR_CHANNELS
+    encoder = (models.Encoder(latent_dim, color_channels))
+    decoder = (models.Decoder(latent_dim, color_channels))
+    reward_predictor = (models.RewardPredictor(latent_dim, num_rewards))
+    discriminator = (models.Discriminator())
+    rgb_decoder = (models.RGBDecoder(color_channels=color_channels, img_size=datasource.RGB_SIZE))
+    transition = (models.Transition(latent_dim, num_actions))
 
     load_from_dir = args.load_from or '.'
     if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
@@ -66,7 +66,7 @@ def main():
 def train(latent_dim, datasource, num_actions, num_rewards,
           encoder, decoder, reward_predictor, discriminator, rgb_decoder, transition):
     batch_size = 32
-    train_iters = 100 * 1000
+    train_iters = 2 * 1000
 
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
@@ -233,8 +233,8 @@ def evaluate(datasource, encoder, decoder, rgb_decoder, transition, discriminato
     #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
 
     #measure_prediction_mse(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
-    visualize_forward_simulation(datasource, encoder, decoder.module, rgb_decoder.module, transition, reward_predictor.module, train_iter, num_factors=latent_dim)
-    visualize_reconstruction(datasource, encoder, decoder.module, rgb_decoder.module, transition, reward_predictor.module, train_iter=train_iter)
+    visualize_forward_simulation(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
+    visualize_reconstruction(datasource, encoder, decoder, rgb_decoder, transition, reward_predictor, train_iter=train_iter)
 
     # Periodically compute expensive metrics
     #if hasattr(datasource, 'simulator'):

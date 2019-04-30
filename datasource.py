@@ -22,6 +22,7 @@ class SC2ZoneIntruders(Datasource):
         self.NUM_ACTIONS = sc2_zone_intruders.NUM_ACTIONS
         self.NUM_REWARDS = sc2_zone_intruders.NUM_REWARDS
         self.RGB_SIZE = sc2_zone_intruders.RGB_SIZE
+        self.COLOR_CHANNELS = 4
 
     def make_env(self):
         return ZoneIntrudersEnvironment()
@@ -38,6 +39,7 @@ class Pong(Datasource):
         self.NUM_ACTIONS = betterpong.NUM_ACTIONS
         self.NUM_REWARDS = betterpong.NUM_REWARDS
         self.RGB_SIZE = betterpong.RGB_SIZE
+        self.COLOR_CHANNELS = 3
 
     def make_env(self):
         return betterpong.BetterPongEnv
