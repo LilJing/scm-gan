@@ -34,11 +34,11 @@ class Transition(nn.Module):
         self.latent_size = latent_size
 
         # Skip connections from output of 1 to input of 6, and output of 2 to input of 5
-        self.conv1 = (nn.Conv2d(latent_size + num_actions, 16, (4,4), stride=2, padding=1))
-        self.conv2 = (nn.Conv2d(16, 32, (4,4), stride=2, padding=1))
+        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 16, (4,4), stride=2, padding=1))
+        self.conv2 = SpectralNorm(nn.Conv2d(16, 32, (4,4), stride=2, padding=1))
         #self.conv3 = (nn.Conv2d(32, 64, (4,4), stride=2, padding=1))
         #self.conv4 = (nn.ConvTranspose2d(64, 32, (4,4), stride=2, padding=1))
-        self.conv5 = (nn.ConvTranspose2d(32, 16, (4,4), stride=2, padding=1))
+        self.conv5 = SpectralNorm(nn.ConvTranspose2d(32, 16, (4,4), stride=2, padding=1))
         self.conv6 = nn.ConvTranspose2d(16 + 16, latent_size, (4,4), stride=2, padding=1)
         self.cuda()
 
