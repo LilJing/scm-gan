@@ -2,6 +2,7 @@ from envs import sc2_zone_intruders
 from envs.sc2_zone_intruders import ZoneIntrudersEnvironment
 from envs import betterpong
 from envs import gridworld
+from envs import gameoflife
 
 
 def allocate_datasource(datasource_name):
@@ -11,6 +12,8 @@ def allocate_datasource(datasource_name):
         return Pong()
     elif datasource_name == 'gridworld':
         return GridWorld()
+    elif datasource_name == 'gameoflife':
+        return GameOfLife()
     msg = 'Failed to find datasource with name {}'.format(datasource_name)
     raise ValueError(msg)
 
@@ -18,6 +21,8 @@ def allocate_datasource(datasource_name):
 class Datasource():
     def __init__(self):
         pass
+    def convert_frame(self, state):
+        return state
 
 
 class SC2ZoneIntruders(Datasource):
@@ -47,9 +52,6 @@ class Pong(Datasource):
     def make_env(self):
         return betterpong.BetterPongEnv()
 
-    def convert_frame(self, state):
-        return state
-
     def get_trajectories(self, *args, **kwargs):
         states, rewards, dones, actions = betterpong.get_trajectories(*args, **kwargs)
         return states, rewards, dones, actions
@@ -65,9 +67,21 @@ class GridWorld(Datasource):
     def make_env(self):
         return gridworld.Env()
 
-    def convert_frame(self, state):
-        return state
-
     def get_trajectories(self, *args, **kwargs):
         states, rewards, dones, actions = gridworld.get_trajectories(*args, **kwargs)
+        return states, rewards, dones, actions
+
+
+class GameOfLife(Datasource):
+    def __init__(self):
+        self.binary_input_channels = 1
+        self.scalar_output_channels = 1
+        self.conv_input_channels = 1
+        self.conv_output_channels = 1
+
+    def make_env(self):
+        return gameoflife.Env()
+
+    def get_trajectories(self, *args, **kwargs):
+        states, rewards, dones, actions = gameoflife.get_trajectories(*args, **kwargs)
         return states, rewards, dones, actions
