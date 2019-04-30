@@ -19,10 +19,11 @@ class Datasource():
 
 class SC2ZoneIntruders(Datasource):
     def __init__(self):
-        self.NUM_ACTIONS = sc2_zone_intruders.NUM_ACTIONS
-        self.NUM_REWARDS = sc2_zone_intruders.NUM_REWARDS
+        self.binary_input_channels = sc2_zone_intruders.NUM_ACTIONS
+        self.scalar_output_channels = sc2_zone_intruders.NUM_REWARDS
         self.RGB_SIZE = sc2_zone_intruders.RGB_SIZE
-        self.COLOR_CHANNELS = 4
+        self.conv_input_channels = 4
+        self.conv_output_channels = 4
 
     def make_env(self):
         return ZoneIntrudersEnvironment()
@@ -36,10 +37,11 @@ class SC2ZoneIntruders(Datasource):
 
 class Pong(Datasource):
     def __init__(self):
-        self.NUM_ACTIONS = betterpong.NUM_ACTIONS
-        self.NUM_REWARDS = betterpong.NUM_REWARDS
+        self.binary_input_channels = betterpong.NUM_ACTIONS
+        self.scalar_output_channels = betterpong.NUM_REWARDS
         self.RGB_SIZE = betterpong.RGB_SIZE
-        self.COLOR_CHANNELS = 3
+        self.conv_input_channels = 3
+        self.conv_output_channels = 3
 
     def make_env(self):
         return betterpong.BetterPongEnv
@@ -49,4 +51,4 @@ class Pong(Datasource):
 
     def get_trajectories(self, *args, **kwargs):
         states, rewards, dones, actions = betterpong.get_trajectories(*args, **kwargs)
-        return states, states, rewards, dones, actions
+        return states, rewards, dones, actions
