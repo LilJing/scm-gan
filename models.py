@@ -51,9 +51,9 @@ class Transition(nn.Module):
         batch_size_actions, num_actions = actions.shape
         assert batch_size == batch_size_actions
 
-        if eps is None:
-            eps = random_eps(batch_size=batch_size)
-        assert len(eps) == batch_size
+        #if eps is None:
+        #    eps = random_eps(batch_size=batch_size)
+        #assert len(eps) == batch_size
 
         # Broadcast the actions across the convolutional map
         actions = actions.unsqueeze(-1).unsqueeze(-1)
