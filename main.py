@@ -101,8 +101,6 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
         states, rewards, dones, actions = datasource.get_trajectories(batch_size, prediction_horizon)
         states = torch.Tensor(states).cuda()
-        #rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
-        #rgb_states = torch.Tensor(rgb_states).cuda()
         rewards = torch.Tensor(rewards).cuda()
         dones = torch.Tensor(dones.astype(int)).cuda()
 
@@ -113,15 +111,14 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         # actions[:, 2] is the action taken after seeing s_2- ie. a_t = \pi(s_t)
         onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
         z = transition(z, onehot_a)
-        z0 = z.clone()
 
-        # Keep track of "done" states to stop predicting a trajectory
-        #  once it reaches the end of the game
+        # Keep track of "done" states to stop a training trajectory at the final time step
         active_mask = torch.ones(batch_size).cuda()
 
         loss = 0
         td_lambda_loss = 0
         lamb = 0.9
+        td_steps = 1
         td_z_set = {}
         # Given the state encoded at t=2, predict state at t=3, t=4, ...
         for t in range(2, prediction_horizon):
@@ -178,19 +175,20 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             # But later at t_b, we updated our belief to s_{r|b}
             # Update s_{r|a} to be closer to s_{r|b}, for every b up to and including s_{r|r}
             for t_a in range(2, t_r - 1):
-                # for t_b in range(2, t_a):
-                # Proper TD: use 4:3, 3:2, 2:1. Not 4:3, 4:2, 4:1, 3:2, 3:1...
-                t_b = t_a + 1
-                expected = td_z_set[t_a]
-                actual = td_z_set[t_b].detach()
-                td_loss_batch = ((expected - actual)**2).mean(-1).mean(-1).mean(-1)
-                td_loss = torch.mean(td_loss_batch * active_mask)
-
-                r_expected = reward_predictor(expected).detach()
-                r_actual = reward_predictor(actual)
-                r_diffs = torch.mean((r_expected - r_actual)**2, dim=1)
-                r_loss = torch.mean(r_diffs * active_mask)
-                td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
+                # Single-Step TD: 4:3, 3:2, 2:1
+                # Multi-Step TD: 4:3, 4:2, 4:1, 3:2, 3:1...
+                for td_step in range(1, td_steps):
+                    # Learn a guess, from a guess
+                    t_b = t_a + td_step
+                    expected = td_z_set[t_a]
+                    actual = td_z_set[t_b].detach()
+                    td_loss_batch = ((expected - actual)**2).mean(-1).mean(-1).mean(-1)
+                    td_loss = torch.mean(td_loss_batch * active_mask)
+                    r_expected = reward_predictor(expected).detach()
+                    r_actual = reward_predictor(actual)
+                    r_diffs = torch.mean((r_expected - r_actual)**2, dim=1)
+                    r_loss = torch.mean(r_diffs * active_mask)
+                    td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
 
         ts.collect('TD', td_lambda_loss)
         loss += theta * td_lambda_loss
@@ -200,24 +198,6 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         opt_dec.step()
         opt_trans.step()
         opt_pred.step()
-
-        """
-        # Begin StarCraft-Specific Hacks
-        # For StarCraftII we use a two-stage decoder
-        # The dynamics and planning model operates entirely in pysc2 feature space
-        # At the end, we convert features to human-visible RGB
-        if train_iter % 4 == 0:
-            opt_rgb.zero_grad()
-            real_rgb = rgb_states[:, 2]
-            simulated_features = decoder(z0).detach()
-            simulated_rgb = rgb_decoder(simulated_features)
-            rgb_loss = torch.mean((real_rgb - simulated_rgb)**2)
-            ts.collect('RGB loss', rgb_loss)
-            rgb_loss.backward()
-            opt_rgb.step()
-        """
-        # End StarCraft-Specific Hacks
-
         ts.print_every(10)
     print(ts)
     print('Finished')
@@ -234,8 +214,8 @@ def evaluate(datasource, encoder, decoder, transition, discriminator, reward_pre
     #filename = 'rgb_reconstruction_iter_{:06d}.png'.format(train_iter)
     #imutil.show(pixels * 255., resize_to=(1024, 512), filename=filename, caption=caption, normalize=False)
 
-    #measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
-    #visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
+    measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
+    visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
     visualize_reconstruction(datasource, encoder, decoder, transition, reward_predictor, train_iter=train_iter)
 
     # Periodically compute expensive metrics
@@ -517,8 +497,6 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
     batch_size = 1
     states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps, random_start=False)
     states = torch.Tensor(states).cuda()
-    #rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
-    #rgb_states = torch.Tensor(rgb_states).cuda()
     rewards = torch.Tensor(rewards).cuda()
     actions = torch.LongTensor(actions).cuda()
     offsets = [1, 3, 5]
@@ -546,8 +524,7 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
 
             # The ground truth
             actual_features = states[:, t + offset]
-            #actual_rgb = rgb_states[:, t + offset]
-            actual_rgb = actual_features[:, :, -3:]
+            actual_rgb = actual_features[:, -3:]
 
             # Difference between actual and predicted outcomes is "surprise"
             surprise_map = torch.clamp((actual_features - predicted_features) ** 2, 0, 1)
@@ -636,37 +613,28 @@ def visualize_forward_simulation(datasource, encoder, decoder, transition, rewar
     z = transition(z, torch.eye(num_actions)[actions[:, 1]].cuda())
     z.detach()
 
-    rgb_vid = imutil.Video('simulation_rgb_iter_{:06d}.mp4'.format(train_iter), framerate=3)
     ftr_vid = imutil.Video('simulation_ftr_iter_{:06d}.mp4'.format(train_iter), framerate=3)
-    factor_vids = []
-    #for i in range(num_factors):
-    #    factor_filename = 'factor_videos/separable_factor_{:03d}_iter_{:06d}.mp4'.format(i, train_iter)
-    #    factor_vids.append(imutil.Video(factor_filename, framerate=3))
 
     # First: replay in simulation the true trajectory
     caption = 'Real'
     simulate_trajectory_from_actions(z.clone(), decoder, reward_pred, transition,
-                                    states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid,
-                                    factor_vids, caption_tag=caption, num_rewards=num_rewards,
+                                    states, rewards, dones, actions, ftr_vid,
+                                    caption_tag=caption, num_rewards=num_rewards,
                                     num_actions=num_actions)
 
-    for vid in factor_vids:
-        vid.finish()
-    rgb_vid.finish()
     ftr_vid.finish()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
 
 
 def simulate_trajectory_from_actions(z, decoder, reward_pred, transition,
-                                     states, rgb_states, rewards, dones, actions, rgb_vid, ftr_vid, factor_vids,
+                                     states, rewards, dones, actions, ftr_vid,
                                      timesteps=60, caption_tag='', num_actions=4, num_rewards=4):
     estimated_cumulative_reward = np.zeros(num_rewards)
     true_cumulative_reward = np.zeros(num_rewards)
     estimated_rewards = []
     for t in range(2, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
-        #x_t_pixels = rgb_decoder(x_t)
         x_t_pixels = x_t[:, -3:]
         estimated_reward, reward_map = reward_pred(z, visualize=True)
         estimated_rewards.append(estimated_reward[0])
@@ -676,8 +644,8 @@ def simulate_trajectory_from_actions(z, decoder, reward_pred, transition,
         # Visualize features and RGB
         caption = '{} t+{} a={} R_est={} R_true = {} '.format(caption_tag, t, actions[:, t],
             format_reward_vector(estimated_reward[0]), format_reward_vector(rewards[0, t]))
-        rgb_pixels = composite_feature_rgb_image(states[:, t], rgb_states[:, t], x_t, x_t_pixels)
-        rgb_vid.write_frame(rgb_pixels, caption=caption, normalize=False)
+        #rgb_pixels = composite_feature_rgb_image(states[:, t], rgb_states[:, t], x_t, x_t_pixels)
+        #rgb_vid.write_frame(rgb_pixels, caption=caption, normalize=False)
 
         # Visualize factors and reward mask
         ftr_pixels = composite_rgb_reward_factor_image(x_t_pixels, reward_map, z)
@@ -699,19 +667,19 @@ def simulate_trajectory_from_actions(z, decoder, reward_pred, transition,
         caption = 'R_est={} R_true = {} '.format(
             format_reward_vector(estimated_cumulative_reward),
             format_reward_vector(true_cumulative_reward))
-        rgb_vid.write_frame(rgb_pixels, caption=caption, normalize=False)
+        #rgb_vid.write_frame(rgb_pixels, caption=caption, normalize=False)
         ftr_vid.write_frame(ftr_pixels, caption=caption, normalize=False)
     print('True cumulative reward: {}'.format(format_reward_vector(true_cumulative_reward)))
     print('Estimated cumulative reward: {}'.format(format_reward_vector(estimated_cumulative_reward)))
 
 
-def measure_prediction_mse(datasource, encoder, decoder, rgb_decoder, transition, reward_pred, train_iter=0, timesteps=100, num_factors=16):
+def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred, train_iter=0, timesteps=100, num_factors=16):
     batch_size = 32
+    start_time = time.time()
     num_actions = datasource.binary_input_channels
     num_rewards = datasource.scalar_output_channels
     states, rewards, dones, actions = datasource.get_trajectories(batch_size=batch_size, timesteps=timesteps, random_start=False)
     states = torch.Tensor(states).cuda()
-    rgb_states = torch.Tensor(rgb_states.transpose(0, 1, 4, 2, 3)).cuda()
     rewards = torch.Tensor(rewards).cuda()
     dones = torch.Tensor(dones.astype(int)).cuda()
 
@@ -733,11 +701,12 @@ def measure_prediction_mse(datasource, encoder, decoder, rgb_decoder, transition
         print('MSE t={} {:.04f}\n'.format(t, rec_loss))
         mse_losses.append(float(rec_loss))
 
-        mae_loss = torch.mean(torch.abs(expected - predicted))
-        print('MAE t={} {:.04f}\n'.format(t, mae_loss))
-        mae_losses.append(float(mae_loss))
+        #mae_loss = torch.mean(torch.abs(expected - predicted))
+        #print('MAE t={} {:.04f}\n'.format(t, mae_loss))
+        #mae_losses.append(float(mae_loss))
         z = transition(z, torch.eye(num_actions)[actions[:, t]].cuda())
 
+    print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
 
