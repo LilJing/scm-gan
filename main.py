@@ -27,6 +27,8 @@ parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-
 parser.add_argument('--load-from', required=True, help='Directory containing .pth models (default: .)')
 parser.add_argument('--evaluate', action='store_true', help='If true, evaluate instead of training')
 parser.add_argument('--evaluations', type=int, default=1, help='Integer number of evaluations to run')
+parser.add_argument('--batch_size', type=int, default=32, help='Training batch size')
+parser.add_argument('--train_iters', type=int, default=10000, help='Number of iterations of training')
 args = parser.parse_args()
 
 
@@ -65,8 +67,8 @@ def main():
 
 def train(latent_dim, datasource, num_actions, num_rewards,
           encoder, decoder, reward_predictor, discriminator, rgb_decoder, transition):
-    batch_size = 32
-    train_iters = 2 * 1000
+    batch_size = args.batch_size
+    train_iters = args.train_iters
 
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
