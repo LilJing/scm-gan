@@ -18,7 +18,7 @@ from spectral_normalization import SpectralNorm
 NOISE_DIM = 3
 ENCODER_INPUT_FRAMES = 3
 
-ts = TimeSeries('Profiling')
+#ts = TimeSeries('Profiling')
 
 
 def random_eps(p=0.5, batch_size=32, height=64, width=64, channels=NOISE_DIM):
@@ -85,8 +85,8 @@ class Transition(nn.Module):
         x = torch.cat([x, skip1], dim=1)
         x = self.conv6(x)
         x = torch.sigmoid(x)
-        ts.collect('Transition', time.time() - start_time)
-        ts.print_every(10)
+        #ts.collect('Transition', time.time() - start_time)
+        #ts.print_every(10)
         return x
 
 
@@ -123,7 +123,7 @@ class Encoder(nn.Module):
 
         x = self.conv4(x)
         x = torch.sigmoid(x)
-        ts.collect('Encoder', time.time() - start_time)
+        #ts.collect('Encoder', time.time() - start_time)
         return x
 
 
@@ -156,7 +156,7 @@ class Inverter(nn.Module):
 
         x = self.conv2(x)
         x = torch.sigmoid(x)
-        ts.collect('NoiseRecognizer', time.time() - start_time)
+        #ts.collect('NoiseRecognizer', time.time() - start_time)
         return x
 
 
@@ -214,7 +214,7 @@ class RewardPredictor(nn.Module):
         x = torch.softmax(x, dim=1)
         # Return the cumulative reward (for each reward type)
         x = x[:, 0] - x[:, 2]
-        ts.collect('RPred', time.time() - start_time)
+        #ts.collect('RPred', time.time() - start_time)
         if visualize:
             return x.sum(-1).sum(-1), x
         return x.sum(-1).sum(-1)
@@ -256,7 +256,7 @@ class Decoder(nn.Module):
             visualization = x[0]
             #imutil.show(x[0], img_padding=8, save=False, display=False, return_pixels=True)
         x = torch.sum(x, dim=1)
-        ts.collect('Decoder', time.time() - start_time)
+        #ts.collect('Decoder', time.time() - start_time)
         if visualize:
             return x, visualization
         return x
