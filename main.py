@@ -124,40 +124,38 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             active_mask = active_mask * (1 - dones[:, t])
 
             # Predict reward
-            expected_reward = reward_predictor(z)
-            actual_reward = rewards[:, t]
-            reward_difference = torch.mean(torch.mean((expected_reward - actual_reward)**2, dim=1) * active_mask)
-            ts.collect('Rd Loss t={}'.format(t), reward_difference)
+            #expected_reward = reward_predictor(z)
+            #actual_reward = rewards[:, t]
+            #reward_difference = torch.mean(torch.mean((expected_reward - actual_reward)**2, dim=1) * active_mask)
+            #ts.collect('Rd Loss t={}'.format(t), reward_difference)
             #loss += .001 * reward_difference
 
             # Reconstruction loss
-            expected = states[:, t]
+            target_pixels = states[:, t]
             predicted_logits = decoder(z)
-            rec_loss_batch = F.binary_cross_entropy_with_logits(predicted_logits, expected, reduction='none')
-            #rec_loss_batch = (F.softmax(predicted_logits) - expected)**2
-            #rec_loss_batch = torch.abs(F.softmax(predicted_logits) - expected)
-            rec_loss_batch = rec_loss_batch.mean(-1).mean(-1).mean(-1)
+            rec_loss_batch = decoder_pixel_loss(target_pixels, predicted_logits)
 
             rec_loss = torch.mean(rec_loss_batch * active_mask)
-            ts.collect('MSE t={}'.format(t), rec_loss)
+            ts.collect('Reconstruction t={}'.format(t), rec_loss)
             loss += rec_loss
 
             # Apply activation L1 loss
-            l1_values = z.abs().mean(-1).mean(-1).mean(-1)
-            l1_loss = torch.mean(l1_values * active_mask)
-            ts.collect('L1 t={}'.format(t), l1_loss)
-            loss += .01 * theta * l1_loss
+            #l1_values = z.abs().mean(-1).mean(-1).mean(-1)
+            #l1_loss = torch.mean(l1_values * active_mask)
+            #ts.collect('L1 t={}'.format(t), l1_loss)
+            #loss += .01 * theta * l1_loss
 
             # Predict transition to the next state
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
             # Apply transition L1 loss
-            t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
-            t_l1_loss = torch.mean(t_l1_values * active_mask)
-            ts.collect('T-L1 t={}'.format(t), t_l1_loss)
-            loss += .01 * theta * t_l1_loss
+            #t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
+            #t_l1_loss = torch.mean(t_l1_values * active_mask)
+            #ts.collect('T-L1 t={}'.format(t), t_l1_loss)
+            #loss += .01 * theta * t_l1_loss
             z = new_z
 
+            """
             # TD-Lambda Loss
             # State i|j is the predicted state at time i conditioned on observation j
             # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
@@ -183,17 +181,20 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 for td_step in range(1, td_steps):
                     # Learn a guess, from a guess
                     t_b = t_a + td_step
-                    expected = td_z_set[t_a]
-                    actual = td_z_set[t_b].detach()
-                    td_loss_batch = ((expected - actual)**2).mean(-1).mean(-1).mean(-1)
+                    target_activations = td_z_set[t_a]
+                    predicted_activations = td_z_set[t_b].detach()
+                    td_loss_batch = latent_state_loss(target_activations, predicted_activations)
                     td_loss = torch.mean(td_loss_batch * active_mask)
-                    r_expected = reward_predictor(expected).detach()
-                    r_actual = reward_predictor(actual)
-                    r_diffs = torch.mean((r_expected - r_actual)**2, dim=1)
-                    r_loss = torch.mean(r_diffs * active_mask)
-                    td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
-        ts.collect('TD', td_lambda_loss)
-        loss += theta * td_lambda_loss
+                    td_lambda_loss += lamb ** (t_b - 1) * td_loss
+                    # TD including reward
+                    #r_expected = reward_predictor(expected).detach()
+                    #r_actual = reward_predictor(actual)
+                    #r_diffs = torch.mean((r_expected - r_actual)**2, dim=1)
+                    #r_loss = torch.mean(r_diffs * active_mask)
+                    #td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
+            """
+        #ts.collect('TD', td_lambda_loss)
+        #loss += theta * td_lambda_loss
         loss.backward()
 
         opt_enc.step()
@@ -203,6 +204,27 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         ts.print_every(10)
     print(ts)
     print('Finished')
+
+
+# Assumes target and predicted are both conv maps of [0, 1] activations
+def latent_state_loss(target, predicted):
+    # MSE
+    return ((target - predicted)**2).mean(-1).mean(-1).mean(-1)
+    # BCE
+    #eps = .0001
+    #target = torch.clamp(target, eps, 1 - eps)
+    #rec_loss_batch = F.binary_cross_entropy(target, predicted, reduction='none')
+    #return rec_loss_batch.mean(-1).mean(-1).mean(-1)
+
+
+# Assumes target is [0, 1] and predicted_logits are [-inf, +inf] sigmoid logits
+def decoder_pixel_loss(target, predicted_logits):
+    # MSE
+    return ((target - torch.sigmoid(predicted_logits))**2).mean(-1).mean(-1).mean(-1)
+    #eps = .0001
+    #target = torch.clamp(target, eps, 1 - eps)
+    #rec_loss_batch = F.binary_cross_entropy_with_logits(target, predicted_logits, reduction='none')
+    #return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
 
 def evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=0):
@@ -317,6 +339,7 @@ def generate_planning_visualization(z, transition, decoder, reward_predictor,
     for t in range(rollout_depth):
         z = transition(z, onehot(actions[:, t]))
         features = decoder(z)
+        features = torch.sigmoid(features)
         rewards = reward_predictor(z)
         cumulative_rewards += rewards[:, 1] - rewards[:, 0]
         mask = cumulative_rewards + 1
@@ -474,8 +497,6 @@ def compute_causal_edge_weights(src_z, transition, onehot_a):
 
 
 def visualize_reconstruction(datasource, encoder, decoder, transition, reward_predictor, train_iter=0):
-    # Image of reconstruction
-    filename = 'vis_iter_{:06d}.png'.format(train_iter)
     num_actions = datasource.binary_input_channels
     num_rewards = datasource.scalar_output_channels
     timesteps = 15
@@ -484,12 +505,12 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
     states = torch.Tensor(states).cuda()
     rewards = torch.Tensor(rewards).cuda()
     actions = torch.LongTensor(actions).cuda()
-    offsets = [1, 3, 5]
+    offsets = [1, 3]
     print('Generating videos for offsets {}'.format(offsets))
     for offset in offsets:
         vid_rgb = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
-        vid_reward = imutil.Video('reward_prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
         vid_aleatoric = imutil.Video('anomaly_detection_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
+        #vid_reward = imutil.Video('reward_prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
         for t in range(3, timesteps - offset):
             # Encode frames t-2, t-1, t to produce state at t-1
             # Then step forward once to produce state at t
@@ -503,7 +524,7 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
 
             # Our prediction of the world from 'offset' steps back
             predicted_features = decoder(z)
-            #predicted_rgb = rgb_decoder(predicted_features)
+            predicted_features = torch.sigmoid(predicted_features)
             predicted_rgb = predicted_features
             predicted_reward, reward_map = reward_predictor(z, visualize=True)
 
@@ -522,13 +543,13 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
             pixels = composite_feature_rgb_image(actual_features, actual_rgb, predicted_features, predicted_rgb)
             vid_rgb.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
 
-            caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
-            reward_pixels = composite_rgb_reward_factor_image(predicted_rgb, reward_map, z, num_rewards=num_rewards)
-            vid_reward.write_frame(reward_pixels, normalize=False, caption=caption)
+            #caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
+            #reward_pixels = composite_rgb_reward_factor_image(predicted_rgb, reward_map, z, num_rewards=num_rewards)
+            #vid_reward.write_frame(reward_pixels, normalize=False, caption=caption)
 
         vid_rgb.finish()
-        vid_reward.finish()
         vid_aleatoric.finish()
+        #vid_reward.finish()
     print('Finished generating forward-prediction videos')
 
 
@@ -620,6 +641,7 @@ def simulate_trajectory_from_actions(z, decoder, reward_pred, transition,
     estimated_rewards = []
     for t in range(2, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
+        x_t = torch.sigmoid(x_t)
         x_t_pixels = x_t[:, -3:]
         estimated_reward, reward_map = reward_pred(z, visualize=True)
         estimated_rewards.append(estimated_reward[0])
@@ -679,8 +701,12 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
     active_mask = torch.ones(batch_size).cuda()
     for t in range(2, timesteps):
         active_mask = active_mask * (1 - dones[:, t])
+        if sum(active_mask) == 0:
+            print('Ending simulation at max trajectory length {}'.format(t))
+            break
         expected = states[:, t]
         predicted = decoder(z)
+        predicted = torch.sigmoid(predicted)
         diffs = active_mask * ((expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
         rec_loss = torch.mean(diffs) * batch_size / torch.sum(active_mask)
         print('MSE t={} {:.04f}\n'.format(t, rec_loss))
@@ -690,6 +716,7 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         #print('MAE t={} {:.04f}\n'.format(t, mae_loss))
         #mae_losses.append(float(mae_loss))
         z = transition(z, torch.eye(num_actions)[actions[:, t]].cuda())
+        z.detach_()
 
     print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
