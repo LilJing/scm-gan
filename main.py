@@ -13,6 +13,7 @@ import torch.optim as optim
 import sc2env
 import imutil
 from logutil import TimeSeries
+import pandas as pd
 
 import models
 from datasource import allocate_datasource
@@ -681,7 +682,7 @@ def simulate_trajectory_from_actions(z, decoder, reward_pred, transition,
 
 
 def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred, train_iter=0, timesteps=100, num_factors=16):
-    batch_size = 32
+    batch_size = 100
     start_time = time.time()
     num_actions = datasource.binary_input_channels
     num_rewards = datasource.scalar_output_channels
@@ -719,6 +720,18 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         z.detach_()
 
     print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
+    plot_params = {
+        'title': 'MSE Loss',
+        'grid': True,
+    }
+    plt = pd.Series(mse_losses).plot(**plot_params)
+    plt.set_ylim(ymin=0)
+    plt.set_ylabel('Pixel MSE')
+    plt.set_xlabel('Prediction horizon (timesteps)')
+    filename = 'mse_iter_{:06d}.png'.format(train_iter)
+    imutil.show(plt, filename=filename)
+    from matplotlib import pyplot
+    pyplot.close()
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
 
