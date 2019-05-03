@@ -141,22 +141,21 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             loss += rec_loss
 
             # Apply activation L1 loss
-            #l1_values = z.abs().mean(-1).mean(-1).mean(-1)
-            #l1_loss = torch.mean(l1_values * active_mask)
-            #ts.collect('L1 t={}'.format(t), l1_loss)
-            #loss += .01 * theta * l1_loss
+            l1_values = z.abs().mean(-1).mean(-1).mean(-1)
+            l1_loss = torch.mean(l1_values * active_mask)
+            ts.collect('L1 t={}'.format(t), l1_loss)
+            loss += .01 * theta * l1_loss
 
             # Predict transition to the next state
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
             # Apply transition L1 loss
-            #t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
-            #t_l1_loss = torch.mean(t_l1_values * active_mask)
-            #ts.collect('T-L1 t={}'.format(t), t_l1_loss)
-            #loss += .01 * theta * t_l1_loss
+            t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
+            t_l1_loss = torch.mean(t_l1_values * active_mask)
+            ts.collect('T-L1 t={}'.format(t), t_l1_loss)
+            loss += .01 * theta * t_l1_loss
             z = new_z
 
-            """
             # TD-Lambda Loss
             # State i|j is the predicted state at time i conditioned on observation j
             # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
@@ -193,9 +192,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     #r_diffs = torch.mean((r_expected - r_actual)**2, dim=1)
                     #r_loss = torch.mean(r_diffs * active_mask)
                     #td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
-            """
-        #ts.collect('TD', td_lambda_loss)
-        #loss += theta * td_lambda_loss
+        ts.collect('TD', td_lambda_loss)
+        loss += theta * td_lambda_loss
         loss.backward()
 
         opt_enc.step()
@@ -681,7 +679,7 @@ def simulate_trajectory_from_actions(z, decoder, reward_pred, transition,
     print('Estimated cumulative reward: {}'.format(format_reward_vector(estimated_cumulative_reward)))
 
 
-def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred, train_iter=0, timesteps=100, num_factors=16):
+def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred, train_iter=0, timesteps=40, num_factors=16):
     batch_size = 100
     start_time = time.time()
     num_actions = datasource.binary_input_channels
