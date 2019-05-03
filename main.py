@@ -88,7 +88,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             torch.save(discriminator.state_dict(), 'model-discriminator.pth')
             torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
 
-        theta = (train_iter / train_iters)
+        #theta = (train_iter / train_iters)
+        theta = 1
         prediction_horizon = 5 + int(2 * theta)
 
         train_mode([encoder, decoder, transition, discriminator, reward_predictor])
@@ -118,7 +119,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         loss = 0
         td_lambda_loss = 0
         lamb = 0.9
-        td_steps = 1
+        td_steps = 2
         td_z_set = {}
         # Given the state encoded at t=2, predict state at t=3, t=4, ...
         for t in range(2, prediction_horizon):
@@ -142,18 +143,18 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
             # Apply activation L1 loss
             l1_values = z.abs().mean(-1).mean(-1).mean(-1)
-            l1_loss = torch.mean(l1_values * active_mask)
+            l1_loss = .01 * torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
-            loss += .01 * theta * l1_loss
+            loss += theta * l1_loss
 
             # Predict transition to the next state
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
             # Apply transition L1 loss
             t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
-            t_l1_loss = torch.mean(t_l1_values * active_mask)
+            t_l1_loss = .01 * torch.mean(t_l1_values * active_mask)
             ts.collect('T-L1 t={}'.format(t), t_l1_loss)
-            loss += .01 * theta * t_l1_loss
+            loss += theta * t_l1_loss
             z = new_z
 
             # TD-Lambda Loss
@@ -178,7 +179,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             for t_a in range(2, t_r - 1):
                 # Single-Step TD: 4:3, 3:2, 2:1
                 # Multi-Step TD: 4:3, 4:2, 4:1, 3:2, 3:1...
-                for td_step in range(1, td_steps):
+                for td_step in range(1, td_steps + 1):
                     # Learn a guess, from a guess
                     t_b = t_a + td_step
                     target_activations = td_z_set[t_a]
@@ -192,6 +193,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     #r_diffs = torch.mean((r_expected - r_actual)**2, dim=1)
                     #r_loss = torch.mean(r_diffs * active_mask)
                     #td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
+            # end time loop
         ts.collect('TD', td_lambda_loss)
         loss += theta * td_lambda_loss
         loss.backward()
@@ -719,7 +721,7 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
 
     print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
     plot_params = {
-        'title': 'MSE Loss',
+        'title': 'MSE Loss, Ours +L1 +TD',
         'grid': True,
     }
     plt = pd.Series(mse_losses).plot(**plot_params)
