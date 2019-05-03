@@ -19,7 +19,6 @@ from datasource import allocate_datasource
 from causal_graph import render_causal_graph
 from higgins import higgins_metric_conv
 from utils import cov
-from tqdm import tqdm
 
 
 parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
@@ -75,9 +74,9 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
     opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.001)
     opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.001)
-    ts = TimeSeries('Training Model', train_iters, tensorboard=False)
+    ts = TimeSeries('Training Model', train_iters, tensorboard=True)
 
-    for train_iter in range(1, train_iters):
+    for train_iter in range(0, train_iters):
         if train_iter % 1000 == 0:
             print('Evaluating networks...')
             evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=train_iter)
@@ -89,7 +88,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
 
         theta = (train_iter / train_iters)
-        prediction_horizon = 5 + int(10 * theta)
+        prediction_horizon = 5 + int(2 * theta)
 
         train_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
@@ -129,12 +128,16 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             actual_reward = rewards[:, t]
             reward_difference = torch.mean(torch.mean((expected_reward - actual_reward)**2, dim=1) * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += .001 * reward_difference
+            #loss += .001 * reward_difference
 
             # Reconstruction loss
             expected = states[:, t]
-            predicted = decoder(z)
-            rec_loss_batch = ((expected - predicted)**2).mean(-1).mean(-1).mean(-1)
+            predicted_logits = decoder(z)
+            rec_loss_batch = F.binary_cross_entropy_with_logits(predicted_logits, expected, reduction='none')
+            #rec_loss_batch = (F.softmax(predicted_logits) - expected)**2
+            #rec_loss_batch = torch.abs(F.softmax(predicted_logits) - expected)
+            rec_loss_batch = rec_loss_batch.mean(-1).mean(-1).mean(-1)
+
             rec_loss = torch.mean(rec_loss_batch * active_mask)
             ts.collect('MSE t={}'.format(t), rec_loss)
             loss += rec_loss
@@ -189,7 +192,6 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     r_diffs = torch.mean((r_expected - r_actual)**2, dim=1)
                     r_loss = torch.mean(r_diffs * active_mask)
                     td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
-
         ts.collect('TD', td_lambda_loss)
         loss += theta * td_lambda_loss
         loss.backward()
@@ -207,6 +209,7 @@ def evaluate(datasource, encoder, decoder, transition, discriminator, reward_pre
     print('Evaluating networks...')
     test_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
+    generate_trajectory_video(datasource)
     measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
     visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
     visualize_reconstruction(datasource, encoder, decoder, transition, reward_predictor, train_iter=train_iter)
@@ -290,6 +293,17 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     print(msg)
 
 
+def generate_trajectory_video(datasource):
+    print("Writing example video of datasource {} to file".format(datasource))
+    filename = 'example_trajectory.mp4'
+    vid = imutil.Video(filename, framerate=10)
+    states, rewards, dones, infos = datasource.get_trajectories(batch_size=1)
+    for state in states[0]:
+        img = state.transpose(1,2,0)
+        vid.write_frame(img, resize_to=(256,256))
+    vid.finish()
+
+
 def generate_planning_visualization(z, transition, decoder, reward_predictor,
                                     num_actions, vid=None, rollout_width=64, rollout_depth=20,
                                     caption_title="Neural Simulation", actions_list=None):
@@ -303,7 +317,6 @@ def generate_planning_visualization(z, transition, decoder, reward_predictor,
     for t in range(rollout_depth):
         z = transition(z, onehot(actions[:, t]))
         features = decoder(z)
-        img = features#rgb_decoder(features)
         rewards = reward_predictor(z)
         cumulative_rewards += rewards[:, 1] - rewards[:, 0]
         mask = cumulative_rewards + 1
@@ -311,7 +324,7 @@ def generate_planning_visualization(z, transition, decoder, reward_predictor,
         mask = mask.reshape(-1, 1, 1, 1)
         best_score = float(torch.max(cumulative_rewards))
         caption = "{} t+{} R={:.2f}".format(caption_title, t, best_score)
-        img = img * mask
+        img = features * mask
         vid.write_frame(img, resize_to=(512,512), caption=caption)
         frames.append(img)
     for img in frames[::-1]:
@@ -465,7 +478,7 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
     filename = 'vis_iter_{:06d}.png'.format(train_iter)
     num_actions = datasource.binary_input_channels
     num_rewards = datasource.scalar_output_channels
-    timesteps = 60
+    timesteps = 15
     batch_size = 1
     states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps, random_start=False)
     states = torch.Tensor(states).cuda()
@@ -477,7 +490,7 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
         vid_rgb = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
         vid_reward = imutil.Video('reward_prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
         vid_aleatoric = imutil.Video('anomaly_detection_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
-        for t in tqdm(range(3, timesteps - offset)):
+        for t in range(3, timesteps - offset):
             # Encode frames t-2, t-1, t to produce state at t-1
             # Then step forward once to produce state at t
             z = encoder(states[:, t-2:t+1])
