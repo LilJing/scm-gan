@@ -88,9 +88,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             torch.save(discriminator.state_dict(), 'model-discriminator.pth')
             torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
 
-        #theta = (train_iter / train_iters)
-        theta = 1
-        prediction_horizon = 5 + int(2 * theta)
+        theta = (train_iter / train_iters)
+        prediction_horizon = 10 + int(20 * theta)
 
         train_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
@@ -134,8 +133,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
             # Reconstruction loss
             target_pixels = states[:, t]
-            predicted_logits = decoder(z)
-            rec_loss_batch = decoder_pixel_loss(target_pixels, predicted_logits)
+            predicted = torch.sigmoid(decoder(z))
+            rec_loss_batch = decoder_pixel_loss(target_pixels, predicted)
 
             rec_loss = torch.mean(rec_loss_batch * active_mask)
             ts.collect('Reconstruction t={}'.format(t), rec_loss)
@@ -149,7 +148,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
             # Predict transition to the next state
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
-            new_z = transition(z, onehot_a)
+            new_z = transition(z, onehot_a).detach()
             # Apply transition L1 loss
             t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
             t_l1_loss = .01 * torch.mean(t_l1_values * active_mask)
@@ -165,12 +164,12 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             t_r = t
             td_z = encoder(states[:, t_r-2:t_r+1])
             a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
-            td_z_set[t_r] = transition(td_z, a)
+            td_z_set[t_r] = transition(td_z, a).detach()
 
             # For each previous t_left, step forward to t_r
             for t_left in range(2, t_r):
                 a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
-                td_z_set[t_left] = transition(td_z_set[t_left], a)
+                td_z_set[t_left] = transition(td_z_set[t_left], a).detach()
 
             # At time t_r, consider each combination (t_a, t_b) where a < b <= r
             # At t_a, we thought t_r would be s_{r|a}
@@ -182,13 +181,13 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 for td_step in range(1, td_steps + 1):
                     # Learn a guess, from a guess
                     t_b = t_a + td_step
-                    target_activations = td_z_set[t_a]
-                    predicted_activations = td_z_set[t_b].detach()
+                    predicted_activations = td_z_set[t_a]
+                    target_activations = td_z_set[t_b].detach()
                     td_loss_batch = latent_state_loss(target_activations, predicted_activations)
                     td_loss = torch.mean(td_loss_batch * active_mask)
                     td_lambda_loss += lamb ** (t_b - 1) * td_loss
                     # TD including reward
-                    #r_expected = reward_predictor(expected).detach()
+                    #r_expected = reward_predictor(expected)
                     #r_actual = reward_predictor(actual)
                     #r_diffs = torch.mean((r_expected - r_actual)**2, dim=1)
                     #r_loss = torch.mean(r_diffs * active_mask)
@@ -207,25 +206,23 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     print('Finished')
 
 
-# Assumes target and predicted are both conv maps of [0, 1] activations
 def latent_state_loss(target, predicted):
     # MSE
-    return ((target - predicted)**2).mean(-1).mean(-1).mean(-1)
+    #return ((target - predicted)**2).mean(-1).mean(-1).mean(-1)
     # BCE
     #eps = .0001
     #target = torch.clamp(target, eps, 1 - eps)
-    #rec_loss_batch = F.binary_cross_entropy(target, predicted, reduction='none')
-    #return rec_loss_batch.mean(-1).mean(-1).mean(-1)
+    rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
+    return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
 
-# Assumes target is [0, 1] and predicted_logits are [-inf, +inf] sigmoid logits
-def decoder_pixel_loss(target, predicted_logits):
+def decoder_pixel_loss(target, predicted):
     # MSE
-    return ((target - torch.sigmoid(predicted_logits))**2).mean(-1).mean(-1).mean(-1)
+    #return ((target - torch.sigmoid(predicted_logits))**2).mean(-1).mean(-1).mean(-1)
     #eps = .0001
     #target = torch.clamp(target, eps, 1 - eps)
-    #rec_loss_batch = F.binary_cross_entropy_with_logits(target, predicted_logits, reduction='none')
-    #return rec_loss_batch.mean(-1).mean(-1).mean(-1)
+    rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
+    return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
 
 def evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=0):
