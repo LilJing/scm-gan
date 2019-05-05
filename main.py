@@ -27,8 +27,8 @@ parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-
 parser.add_argument('--load-from', required=True, help='Directory containing .pth models (default: .)')
 parser.add_argument('--evaluate', action='store_true', help='If true, evaluate instead of training')
 parser.add_argument('--evaluations', type=int, default=1, help='Integer number of evaluations to run')
-parser.add_argument('--batch_size', type=int, default=32, help='Training batch size')
-parser.add_argument('--train_iters', type=int, default=10000, help='Number of iterations of training')
+parser.add_argument('--batch-size', type=int, default=32, help='Training batch size')
+parser.add_argument('--train-iters', type=int, default=10000, help='Number of iterations of training')
 args = parser.parse_args()
 
 
@@ -148,7 +148,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
             # Predict transition to the next state
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
-            new_z = transition(z, onehot_a).detach()
+            new_z = transition(z.detach(), onehot_a)
             # Apply transition L1 loss
             t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
             t_l1_loss = .01 * torch.mean(t_l1_values * active_mask)
@@ -164,12 +164,12 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             t_r = t
             td_z = encoder(states[:, t_r-2:t_r+1])
             a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
-            td_z_set[t_r] = transition(td_z, a).detach()
+            td_z_set[t_r] = transition(td_z, a)
 
             # For each previous t_left, step forward to t_r
             for t_left in range(2, t_r):
                 a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
-                td_z_set[t_left] = transition(td_z_set[t_left], a).detach()
+                td_z_set[t_left] = transition(td_z_set[t_left].detach(), a)
 
             # At time t_r, consider each combination (t_a, t_b) where a < b <= r
             # At t_a, we thought t_r would be s_{r|a}
@@ -210,8 +210,8 @@ def latent_state_loss(target, predicted):
     # MSE
     #return ((target - predicted)**2).mean(-1).mean(-1).mean(-1)
     # BCE
-    #eps = .0001
-    #target = torch.clamp(target, eps, 1 - eps)
+    eps = .0001
+    target = torch.clamp(target, eps, 1 - eps)
     rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
     return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
@@ -219,8 +219,8 @@ def latent_state_loss(target, predicted):
 def decoder_pixel_loss(target, predicted):
     # MSE
     #return ((target - torch.sigmoid(predicted_logits))**2).mean(-1).mean(-1).mean(-1)
-    #eps = .0001
-    #target = torch.clamp(target, eps, 1 - eps)
+    eps = .0001
+    target = torch.clamp(target, eps, 1 - eps)
     rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
     return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
@@ -678,7 +678,8 @@ def simulate_trajectory_from_actions(z, decoder, reward_pred, transition,
     print('Estimated cumulative reward: {}'.format(format_reward_vector(estimated_cumulative_reward)))
 
 
-def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred, train_iter=0, timesteps=40, num_factors=16):
+def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred,
+                           train_iter=0, timesteps=40, num_factors=16, experiment_name=''):
     batch_size = 100
     start_time = time.time()
     num_actions = datasource.binary_input_channels
@@ -718,7 +719,7 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
 
     print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
     plot_params = {
-        'title': 'MSE Loss, Ours +L1 +TD',
+        'title': 'MSE Loss {}'.format(experiment_name),
         'grid': True,
     }
     plt = pd.Series(mse_losses).plot(**plot_params)
