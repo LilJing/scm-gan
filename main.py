@@ -161,6 +161,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
             # Also, state 3|1 will be equal to state 3|2
             # Encode the ground-truth state for t_r
+            """
             t_r = t
             td_z = encoder(states[:, t_r-2:t_r+1])
             a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
@@ -193,8 +194,9 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     #r_loss = torch.mean(r_diffs * active_mask)
                     #td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
             # end time loop
-        ts.collect('TD', td_lambda_loss)
-        loss += theta * td_lambda_loss
+            """
+        #ts.collect('TD', td_lambda_loss)
+        #loss += theta * td_lambda_loss
         loss.backward()
 
         opt_enc.step()
@@ -222,6 +224,7 @@ def decoder_pixel_loss(target, predicted):
     eps = .0001
     target = torch.clamp(target, eps, 1 - eps)
     rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
+    rec_loss_batch = 0.5 * rec_loss_batch + 0.5 * target
     return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
 

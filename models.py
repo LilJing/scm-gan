@@ -26,6 +26,20 @@ def random_eps(p=0.5, batch_size=32, height=64, width=64, channels=NOISE_DIM):
     return torch.bernoulli(torch.ones(shape) * p).cuda()
 
 
+from torch.autograd import Function
+class DifferentiableBernoulliSampler(Function):
+    @staticmethod
+    def forward(ctx, x):
+        # In the forward pass, discretize by sampling
+        #ctx.save_for_backward(x)
+        return torch.bernoulli(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # In the backward pass, change nothing
+        return grad_output
+
+
 class Transition(nn.Module):
     def __init__(self, latent_size, num_actions):
         super().__init__()
@@ -69,6 +83,7 @@ class Transition(nn.Module):
 
         x = self.conv2(x)
         x = F.leaky_relu(x)
+
         #skip2 = x.clone()
 
         #x = self.conv3(x)
@@ -85,9 +100,15 @@ class Transition(nn.Module):
         x = torch.cat([x, skip1], dim=1)
         x = self.conv6(x)
         x = torch.sigmoid(x)
+
+        # And now, to make it stochastic: sample from the resulting
+        # factorized multivariate Bernoulli distribution
+        x = DifferentiableBernoulliSampler.apply(x)
+
         #ts.collect('Transition', time.time() - start_time)
         #ts.print_every(10)
         return x
+
 
 
 class Encoder(nn.Module):
@@ -96,11 +117,11 @@ class Encoder(nn.Module):
         self.latent_size = latent_size
         self.color_channels = color_channels
         # Bx1x64x64
-        self.conv1 = nn.Conv2d(color_channels * ENCODER_INPUT_FRAMES, 64, (3,3), stride=1, padding=1)
+        self.conv1 = SpectralNorm(nn.Conv2d(color_channels * ENCODER_INPUT_FRAMES, 64, (3,3), stride=1, padding=1))
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=1, padding=1))
-        self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=2, padding=1))
+        #self.conv2 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=1, padding=1))
+        #self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=2, padding=1))
         self.conv4 = nn.Conv2d(64, latent_size, (3,3), stride=1, padding=1)
 
         # Bxlatent_size
@@ -118,8 +139,8 @@ class Encoder(nn.Module):
         #x = self.conv2(x)
         #x = F.leaky_relu(x)
 
-        x = self.conv3(x)
-        x = F.leaky_relu(x)
+        #x = self.conv3(x)
+        #x = F.leaky_relu(x)
 
         x = self.conv4(x)
         x = torch.sigmoid(x)
@@ -227,11 +248,11 @@ class Decoder(nn.Module):
         self.color_channels = color_channels
 
         # Bx1x64x64
-        self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (4,4),
-                        stride=2, padding=1, groups=latent_size, bias=False)
+        self.conv1 = nn.Conv2d(latent_size, latent_size*4, (3,3),
+                        stride=1, padding=1, groups=latent_size, bias=False)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.ConvTranspose2d(latent_size * 4,
+        self.conv2 = nn.Conv2d(latent_size * 4,
                                         latent_size*self.color_channels, (3,3),
                                         stride=1, padding=1,
                                         groups=latent_size, bias=False)
@@ -248,7 +269,7 @@ class Decoder(nn.Module):
 
         x = self.conv2(x)
         # Sum the separate items
-        x = x.view(batch_size, latent_size, self.color_channels, height*2, width*2)
+        x = x.view(batch_size, latent_size, self.color_channels, height, width)
 
         # Optional: Learn to subtract static background, separate from objects
         #x = x + self.bg
