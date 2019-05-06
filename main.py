@@ -89,7 +89,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
 
         theta = (train_iter / train_iters)
-        prediction_horizon = 10 + int(20 * theta)
+        prediction_horizon = 5 + int(10 * theta)
 
         train_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
@@ -148,7 +148,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
             # Predict transition to the next state
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
-            new_z = transition(z.detach(), onehot_a)
+            new_z = transition(z, onehot_a)
             # Apply transition L1 loss
             t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
             t_l1_loss = .01 * torch.mean(t_l1_values * active_mask)
@@ -169,7 +169,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             # For each previous t_left, step forward to t_r
             for t_left in range(2, t_r):
                 a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
-                td_z_set[t_left] = transition(td_z_set[t_left].detach(), a)
+                td_z_set[t_left] = transition(td_z_set[t_left], a)
 
             # At time t_r, consider each combination (t_a, t_b) where a < b <= r
             # At t_a, we thought t_r would be s_{r|a}
