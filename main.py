@@ -109,8 +109,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         # Given t, t+1, t+2, encoder outputs the state at time t+1
         # We then step forward one timestep (from t+1) to predict t+2
         # actions[:, 2] is the action taken after seeing s_2- ie. a_t = \pi(s_t)
-        onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
-        z = transition(z, onehot_a)
+        #onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
+        #z = transition(z, onehot_a)
 
         # Keep track of "done" states to stop a training trajectory at the final time step
         active_mask = torch.ones(batch_size).cuda()
@@ -121,7 +121,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         td_steps = 2
         td_z_set = {}
         # Given the state encoded at t=2, predict state at t=3, t=4, ...
-        for t in range(2, prediction_horizon):
+        for t in range(1, prediction_horizon - 1):
             active_mask = active_mask * (1 - dones[:, t])
 
             # Predict reward
@@ -161,29 +161,29 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
             # Also, state 3|1 will be equal to state 3|2
             # Encode the ground-truth state for t_r
-            """
-            t_r = t
-            td_z = encoder(states[:, t_r-2:t_r+1])
-            a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
-            td_z_set[t_r] = transition(td_z, a)
+            #t_r = t
+            #td_z = encoder(states[:, t-1:t+2])
+            #a = torch.eye(num_actions)[actions[:, t - 1]].cuda()
+            #td_z_set[t] = transition(td_z, a)
 
-            # For each previous t_left, step forward to t_r
-            for t_left in range(2, t_r):
-                a = torch.eye(num_actions)[actions[:, t_r - 1]].cuda()
+            td_z_set[t] = encoder(states[:, t-1:t+2])
+
+            # For each previous t_left, step forward to t
+            for t_left in range(1, t):
+                a = torch.eye(num_actions)[actions[:, t - 1]].cuda()
                 td_z_set[t_left] = transition(td_z_set[t_left], a)
 
-            # At time t_r, consider each combination (t_a, t_b) where a < b <= r
-            # At t_a, we thought t_r would be s_{r|a}
+            # At time t, consider each combination (t_a, t_b) where a < b <= r
+            # At t_a, we thought t would be s_{r|a}
             # But later at t_b, we updated our belief to s_{r|b}
             # Update s_{r|a} to be closer to s_{r|b}, for every b up to and including s_{r|r}
-            for t_a in range(2, t_r - 1):
+            for t_a in range(2, t - 1):
                 # Single-Step TD: 4:3, 3:2, 2:1
                 # Multi-Step TD: 4:3, 4:2, 4:1, 3:2, 3:1...
-                for td_step in range(1, td_steps + 1):
+                for t_b in range(t_a + 1, t_a + td_steps + 1):
                     # Learn a guess, from a guess
-                    t_b = t_a + td_step
                     predicted_activations = td_z_set[t_a]
-                    target_activations = td_z_set[t_b].detach()
+                    target_activations = td_z_set[t_b]
                     td_loss_batch = latent_state_loss(target_activations, predicted_activations)
                     td_loss = torch.mean(td_loss_batch * active_mask)
                     td_lambda_loss += lamb ** (t_b - 1) * td_loss
@@ -194,9 +194,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     #r_loss = torch.mean(r_diffs * active_mask)
                     #td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
             # end time loop
-            """
-        #ts.collect('TD', td_lambda_loss)
-        #loss += theta * td_lambda_loss
+        ts.collect('TD', td_lambda_loss)
+        loss += theta * td_lambda_loss
         loss.backward()
 
         opt_enc.step()
@@ -210,21 +209,21 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
 def latent_state_loss(target, predicted):
     # MSE
-    #return ((target - predicted)**2).mean(-1).mean(-1).mean(-1)
+    return ((target - predicted)**2).mean(-1).mean(-1).mean(-1)
     # BCE
-    eps = .0001
-    target = torch.clamp(target, eps, 1 - eps)
-    rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
-    return rec_loss_batch.mean(-1).mean(-1).mean(-1)
+    #eps = .0001
+    #target = torch.clamp(target, eps, 1 - eps)
+    #rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
+    #return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
 
 def decoder_pixel_loss(target, predicted):
     # MSE
     #return ((target - torch.sigmoid(predicted_logits))**2).mean(-1).mean(-1).mean(-1)
     eps = .0001
-    target = torch.clamp(target, eps, 1 - eps)
+    #target = torch.clamp(target, eps, 1 - eps)
     rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
-    rec_loss_batch = 0.5 * rec_loss_batch + 0.5 * target
+    #rec_loss_batch = 0.5 * rec_loss_batch + 0.5 * target
     return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
 

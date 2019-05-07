@@ -248,13 +248,13 @@ class Decoder(nn.Module):
         self.color_channels = color_channels
 
         # Bx1x64x64
-        self.conv1 = nn.Conv2d(latent_size, latent_size*4, (3,3),
-                        stride=1, padding=1, groups=latent_size, bias=False)
+        self.conv1 = nn.Conv2d(latent_size, latent_size*4, (1,1),
+                        stride=1, padding=0, groups=latent_size, bias=False)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
         self.conv2 = nn.Conv2d(latent_size * 4,
-                                        latent_size*self.color_channels, (3,3),
-                                        stride=1, padding=1,
+                                        latent_size*self.color_channels, (1,1),
+                                        stride=1, padding=0,
                                         groups=latent_size, bias=False)
         #self.bg = nn.Parameter(torch.zeros((3, IMG_SIZE, IMG_SIZE)).cuda())
         self.cuda()
