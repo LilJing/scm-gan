@@ -103,7 +103,8 @@ class Transition(nn.Module):
 
         # And now, to make it stochastic: sample from the resulting
         # factorized multivariate Bernoulli distribution
-        x = DifferentiableBernoulliSampler.apply(x)
+        if self.training:
+            x = DifferentiableBernoulliSampler.apply(x)
 
         #ts.collect('Transition', time.time() - start_time)
         #ts.print_every(10)
