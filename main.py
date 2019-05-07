@@ -3,6 +3,7 @@ import argparse
 import time
 import math
 import os
+import json
 
 import numpy as np
 import torch
@@ -69,12 +70,17 @@ def train(latent_dim, datasource, num_actions, num_rewards,
           encoder, decoder, reward_predictor, discriminator, transition):
     batch_size = args.batch_size
     train_iters = args.train_iters
+    lamb = 0.9
+    td_steps = 3
+    truncate_bptt = False
+    enable_td = False
+    learning_rate = .001
 
-    opt_enc = torch.optim.Adam(encoder.parameters(), lr=.001)
-    opt_dec = torch.optim.Adam(decoder.parameters(), lr=.001)
-    opt_trans = torch.optim.Adam(transition.parameters(), lr=.001)
-    opt_disc = torch.optim.Adam(discriminator.parameters(), lr=.001)
-    opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=.001)
+    opt_enc = torch.optim.Adam(encoder.parameters(), lr=learning_rate)
+    opt_dec = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
+    opt_trans = torch.optim.Adam(transition.parameters(), lr=learning_rate)
+    opt_disc = torch.optim.Adam(discriminator.parameters(), lr=learning_rate)
+    opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=learning_rate)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
 
     for train_iter in range(0, train_iters):
@@ -88,8 +94,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             torch.save(discriminator.state_dict(), 'model-discriminator.pth')
             torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
 
-        theta = (train_iter / train_iters)
-        prediction_horizon = 5 + int(10 * theta)
+        theta = train_iter / train_iters
+        prediction_horizon = 3 + int(10 * theta)
 
         train_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
@@ -105,20 +111,14 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         dones = torch.Tensor(dones.astype(int)).cuda()
 
         # Encode the initial state (using the first 3 frames)
-        z = encoder(states[:, 0:3])
         # Given t, t+1, t+2, encoder outputs the state at time t+1
-        # We then step forward one timestep (from t+1) to predict t+2
-        # actions[:, 2] is the action taken after seeing s_2- ie. a_t = \pi(s_t)
-        #onehot_a = torch.eye(num_actions)[actions[:, 1]].cuda()
-        #z = transition(z, onehot_a)
+        z = encoder(states[:, 0:3])
 
         # Keep track of "done" states to stop a training trajectory at the final time step
         active_mask = torch.ones(batch_size).cuda()
 
         loss = 0
         td_lambda_loss = 0
-        lamb = 0.9
-        td_steps = 2
         td_z_set = {}
         # Given the state encoded at t=2, predict state at t=3, t=4, ...
         for t in range(1, prediction_horizon - 1):
@@ -135,6 +135,9 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             target_pixels = states[:, t]
             predicted = torch.sigmoid(decoder(z))
             rec_loss_batch = decoder_pixel_loss(target_pixels, predicted)
+
+            if truncate_bptt and t > 1:
+                z.detach_()
 
             rec_loss = torch.mean(rec_loss_batch * active_mask)
             ts.collect('Reconstruction t={}'.format(t), rec_loss)
@@ -156,16 +159,13 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             loss += theta * t_l1_loss
             z = new_z
 
+            if not enable_td:
+                continue
+
             # TD-Lambda Loss
             # State i|j is the predicted state at time i conditioned on observation j
             # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
             # Also, state 3|1 will be equal to state 3|2
-            # Encode the ground-truth state for t_r
-            #t_r = t
-            #td_z = encoder(states[:, t-1:t+2])
-            #a = torch.eye(num_actions)[actions[:, t - 1]].cuda()
-            #td_z_set[t] = transition(td_z, a)
-
             td_z_set[t] = encoder(states[:, t-1:t+2])
 
             # For each previous t_left, step forward to t
@@ -173,19 +173,20 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 a = torch.eye(num_actions)[actions[:, t - 1]].cuda()
                 td_z_set[t_left] = transition(td_z_set[t_left], a)
 
-            # At time t, consider each combination (t_a, t_b) where a < b <= r
-            # At t_a, we thought t would be s_{r|a}
+            # At time t_r, consider each combination (t_a, t_b) where a < b <= r
+            # At t_a, we thought t_r would be s_{r|a}
             # But later at t_b, we updated our belief to s_{r|b}
             # Update s_{r|a} to be closer to s_{r|b}, for every b up to and including s_{r|r}
             for t_a in range(2, t - 1):
                 # Single-Step TD: 4:3, 3:2, 2:1
                 # Multi-Step TD: 4:3, 4:2, 4:1, 3:2, 3:1...
-                for t_b in range(t_a + 1, t_a + td_steps + 1):
+                for t_b in range(t_a + 1, min(t_a + td_steps, t + 1)):
                     # Learn a guess, from a guess
                     predicted_activations = td_z_set[t_a]
                     target_activations = td_z_set[t_b]
                     td_loss_batch = latent_state_loss(target_activations, predicted_activations)
                     td_loss = torch.mean(td_loss_batch * active_mask)
+                    #ts.collect('TD {}:{}:{}'.format(t_a, t_b, t), td_lambda_loss)
                     td_lambda_loss += lamb ** (t_b - 1) * td_loss
                     # TD including reward
                     #r_expected = reward_predictor(expected)
@@ -193,9 +194,10 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     #r_diffs = torch.mean((r_expected - r_actual)**2, dim=1)
                     #r_loss = torch.mean(r_diffs * active_mask)
                     #td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
-            # end time loop
-        ts.collect('TD', td_lambda_loss)
-        loss += theta * td_lambda_loss
+            # end TD time loop
+        if enable_td:
+            ts.collect('TD total', td_lambda_loss)
+            loss += theta * td_lambda_loss
         loss.backward()
 
         opt_enc.step()
@@ -220,7 +222,7 @@ def latent_state_loss(target, predicted):
 def decoder_pixel_loss(target, predicted):
     # MSE
     #return ((target - torch.sigmoid(predicted_logits))**2).mean(-1).mean(-1).mean(-1)
-    eps = .0001
+    #eps = .0001
     #target = torch.clamp(target, eps, 1 - eps)
     rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
     #rec_loss_batch = 0.5 * rec_loss_batch + 0.5 * target
