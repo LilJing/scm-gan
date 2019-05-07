@@ -719,6 +719,9 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         z = transition(z, torch.eye(num_actions)[actions[:, t]].cuda())
         z.detach_()
 
+    filename = 'mse_iter_{:06d}.json'.format(train_iter)
+    with open(filename, 'w') as fp:
+        fp.write(json.dumps(mse_losses, indent=2))
     print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
     plot_params = {
         'title': 'MSE Loss {}'.format(experiment_name),
