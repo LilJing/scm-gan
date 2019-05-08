@@ -29,8 +29,8 @@ class SC2ZoneIntruders(Datasource):
     def __init__(self):
         self.binary_input_channels = sc2_zone_intruders.NUM_ACTIONS
         self.scalar_output_channels = sc2_zone_intruders.NUM_REWARDS
-        self.conv_input_channels = 4
-        self.conv_output_channels = 4
+        self.conv_input_channels = 3
+        self.conv_output_channels = 3
 
     def make_env(self):
         return ZoneIntrudersEnvironment()

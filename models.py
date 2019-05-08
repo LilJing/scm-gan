@@ -105,6 +105,9 @@ class Transition(nn.Module):
         # factorized multivariate Bernoulli distribution
         if self.training:
             x = DifferentiableBernoulliSampler.apply(x)
+        else:
+            # During test time, drop the sampling
+            x = (x > 0.5).type(x.type())
 
         #ts.collect('Transition', time.time() - start_time)
         #ts.print_every(10)
@@ -123,7 +126,7 @@ class Encoder(nn.Module):
         # Bx8x32x32
         #self.conv2 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=1, padding=1))
         #self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=2, padding=1))
-        self.conv4 = nn.Conv2d(64, latent_size, (3,3), stride=1, padding=1)
+        self.conv4 = nn.Conv2d(64, latent_size, (4,4), stride=2, padding=1)
 
         # Bxlatent_size
         self.cuda()
@@ -249,13 +252,13 @@ class Decoder(nn.Module):
         self.color_channels = color_channels
 
         # Bx1x64x64
-        self.conv1 = nn.Conv2d(latent_size, latent_size*4, (1,1),
-                        stride=1, padding=0, groups=latent_size, bias=False)
+        self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (3,3),
+                        stride=2, padding=1, groups=latent_size, bias=False)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
-        self.conv2 = nn.Conv2d(latent_size * 4,
-                                        latent_size*self.color_channels, (1,1),
-                                        stride=1, padding=0,
+        self.conv2 = nn.ConvTranspose2d(latent_size * 4,
+                                        latent_size*self.color_channels, (4,4),
+                                        stride=1, padding=1,
                                         groups=latent_size, bias=False)
         #self.bg = nn.Parameter(torch.zeros((3, IMG_SIZE, IMG_SIZE)).cuda())
         self.cuda()
@@ -270,7 +273,7 @@ class Decoder(nn.Module):
 
         x = self.conv2(x)
         # Sum the separate items
-        x = x.view(batch_size, latent_size, self.color_channels, height, width)
+        x = x.view(batch_size, latent_size, self.color_channels, height*2, width*2)
 
         # Optional: Learn to subtract static background, separate from objects
         #x = x + self.bg

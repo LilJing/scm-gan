@@ -95,7 +95,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
 
         theta = train_iter / train_iters
-        prediction_horizon = 5 + int(10 * theta)
+        prediction_horizon = 4 + int(5 * theta)
 
         train_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
@@ -532,7 +532,7 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
 
             # The ground truth
             actual_features = states[:, t + offset]
-            actual_rgb = actual_features[:, -3:]
+            actual_rgb = convert_ndim_image_to_rgb(actual_features)
 
             # Difference between actual and predicted outcomes is "surprise"
             surprise_map = torch.clamp((actual_features - predicted_features) ** 2, 0, 1)
@@ -644,7 +644,7 @@ def simulate_trajectory_from_actions(z, decoder, reward_pred, transition,
     for t in range(2, timesteps - 1):
         x_t, x_t_separable = decoder(z, visualize=True)
         x_t = torch.sigmoid(x_t)
-        x_t_pixels = x_t[:, -3:]
+        x_t_pixels = convert_ndim_image_to_rgb(x_t)
         estimated_reward, reward_map = reward_pred(z, visualize=True)
         estimated_rewards.append(estimated_reward[0])
         estimated_cumulative_reward += estimated_reward[0].data.cpu().numpy()
@@ -682,9 +682,15 @@ def simulate_trajectory_from_actions(z, decoder, reward_pred, transition,
     print('Estimated cumulative reward: {}'.format(format_reward_vector(estimated_cumulative_reward)))
 
 
+def convert_ndim_image_to_rgb(x):
+    if x.shape[1] == 3:
+        return x
+    return x.sum(dim=1).unsqueeze(1).repeat(1,3,1,1)
+
+
 def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred,
                            train_iter=0, timesteps=40, num_factors=16, experiment_name=''):
-    batch_size = 100
+    batch_size = 1
     start_time = time.time()
     num_actions = datasource.binary_input_channels
     num_rewards = datasource.scalar_output_channels

@@ -138,10 +138,10 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
         rewards_batch.append(np.array(rewards))
         dones_batch.append(np.array(dones))
         actions_batch.append(np.array(actions))
-    return np.array(states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
+    return np.array(rgb_states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
 
 
-def convert_frame(state, width=64, height=64):
+def convert_frame(state):
     feature_map, feature_screen, rgb_map, rgb_screen = state
     rgb_screen = rgb_screen.transpose(2, 0, 1)
     return feature_screen, rgb_screen / 255.
