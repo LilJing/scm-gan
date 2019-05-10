@@ -15,7 +15,7 @@ directory.
 To run the system with the example Pong environment, run:
 
 ```
-python main.py --load-from . --env betterpong
+python main.py --load-from . --env pong
 ```
 
 Note: The constants defined in `models.py` and the hyperparameters
