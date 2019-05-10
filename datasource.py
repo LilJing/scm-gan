@@ -1,13 +1,12 @@
-from envs import sc2_zone_intruders
-from envs.sc2_zone_intruders import ZoneIntrudersEnvironment
+from envs import sc2_star_intruders
 from envs import betterpong
 from envs import gridworld
 from envs import gameoflife
 
 
 def allocate_datasource(datasource_name):
-    if datasource_name == 'sc2_zone_intruders':
-        return SC2ZoneIntruders()
+    if datasource_name == 'sc2_star_intruders':
+        return SC2StarIntruders()
     elif datasource_name == 'pong':
         return Pong()
     elif datasource_name == 'gridworld':
@@ -25,21 +24,21 @@ class Datasource():
         return state
 
 
-class SC2ZoneIntruders(Datasource):
+class SC2StarIntruders(Datasource):
     def __init__(self):
-        self.binary_input_channels = sc2_zone_intruders.NUM_ACTIONS
-        self.scalar_output_channels = sc2_zone_intruders.NUM_REWARDS
-        self.conv_input_channels = 3
-        self.conv_output_channels = 3
+        self.binary_input_channels = sc2_star_intruders.NUM_ACTIONS
+        self.scalar_output_channels = sc2_star_intruders.NUM_REWARDS
+        self.conv_input_channels = 4
+        self.conv_output_channels = 4
 
     def make_env(self):
-        return ZoneIntrudersEnvironment()
+        return sc2_star_intruders.StarIntrudersEnvironment()
 
     def convert_frame(self, state):
-        return sc2_zone_intruders.convert_frame(state)
+        return sc2_star_intruders.convert_frame(state)
 
     def get_trajectories(self, *args, **kwargs):
-        return sc2_zone_intruders.get_trajectories(*args, **kwargs)
+        return sc2_star_intruders.get_trajectories(*args, **kwargs)
 
 
 class Pong(Datasource):

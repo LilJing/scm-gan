@@ -245,7 +245,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
          reward_predictor, discriminator, transition):
 
     # Initialize environment
-    env = datasource.ZoneIntrudersEnvironment()
+    env = datasource.make_env()
 
     # No-op through the first 3 frames for initial state estimation
     state = env.reset()

@@ -8,7 +8,7 @@ from threading import Thread
 import imutil
 import gym
 
-from sc2env.environments.zone_intruders import ZoneIntrudersEnvironment
+from sc2env.environments.star_intruders import StarIntrudersEnvironment
 
 REPLAY_BUFFER_LEN = 50
 MIN_REPLAY_BUFFER_LEN = 4
@@ -18,6 +18,7 @@ NUM_ACTIONS = 4
 NUM_REWARDS = 2
 NO_OP_ACTION = 0
 RGB_SIZE = 256
+MAP_NAME = 'StarIntruders'
 
 replay_buffer = []
 initialized = False
@@ -31,7 +32,7 @@ def init():
     global env
     global initialized
     global sim_thread
-    env = ZoneIntrudersEnvironment()
+    env = StarIntrudersEnvironment(map_name=MAP_NAME)
     sim_thread = Thread(target=play_game_thread)
     sim_thread.daemon = True  # hack to kill on ctrl+C
     sim_thread.start()
@@ -138,7 +139,7 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
         rewards_batch.append(np.array(rewards))
         dones_batch.append(np.array(dones))
         actions_batch.append(np.array(actions))
-    return np.array(rgb_states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
+    return np.array(states_batch), np.array(rewards_batch), np.array(dones_batch), np.array(actions_batch)
 
 
 def convert_frame(state):
