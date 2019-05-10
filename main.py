@@ -125,11 +125,11 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             active_mask = active_mask * (1 - dones[:, t])
 
             # Predict reward
-            #expected_reward = reward_predictor(z)
-            #actual_reward = rewards[:, t]
-            #reward_difference = torch.mean(torch.mean((expected_reward - actual_reward)**2, dim=1) * active_mask)
-            #ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            #loss += .001 * reward_difference
+            expected_reward = reward_predictor(z)
+            actual_reward = rewards[:, t]
+            reward_difference = torch.mean(torch.mean((expected_reward - actual_reward)**2, dim=1) * active_mask)
+            ts.collect('Rd Loss t={}'.format(t), reward_difference)
+            loss += .0001 * reward_difference  # Normalize by height * width
 
             # Reconstruction loss
             target_pixels = states[:, t]
