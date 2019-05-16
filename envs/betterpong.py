@@ -72,18 +72,18 @@ class BetterPongEnv():
         if self.ball_y <= 2 and self.ball_velocity_y < 0:
             self.ball_velocity_y *= -1
 
-        # If the ball goes out of the court, the episode ends
+        # If the ball goes out of the court, a reward is generated
         done = False
         reward = 0
         if self.ball_x >= GAME_SIZE and self.ball_velocity_x > 0:
-            # Blue player scores, episode is over
+            # Blue player scores
             reward = 1
-            done = True
+            self.ball_velocity_x *= -1
 
         if self.ball_x <= 0 and self.ball_velocity_x < 0:
-            # Red player scores, episode is over
+            # Red player scores
             reward = -1
-            done = True
+            self.ball_velocity_x *= -1
 
         self.state = render_state(self.left_y, self.right_y, self.ball_x, self.ball_y, self.ball_velocity_x, self.ball_velocity_y)
         info = {}
