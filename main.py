@@ -148,7 +148,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
             # Apply activation L1 loss
             l1_values = z.abs().mean(-1).mean(-1).mean(-1)
-            l1_loss = .01 * torch.mean(l1_values * active_mask)
+            l1_loss = .05 * torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
             loss += theta * l1_loss
 
@@ -157,7 +157,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             new_z = transition(z, onehot_a)
             # Apply transition L1 loss
             t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
-            t_l1_loss = .01 * torch.mean(t_l1_values * active_mask)
+            t_l1_loss = .05 * torch.mean(t_l1_values * active_mask)
             ts.collect('T-L1 t={}'.format(t), t_l1_loss)
             loss += theta * t_l1_loss
             z = new_z
@@ -729,6 +729,9 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         #mae_losses.append(float(mae_loss))
         z = transition(z, torch.eye(num_actions)[actions[:, t]].cuda())
         z.detach_()
+    if len(mse_losses) == 0:
+        print('Degenerate trajectory, skipping MSE calculation')
+        return
 
     filename = 'mse_iter_{:06d}.json'.format(train_iter)
     with open(filename, 'w') as fp:
