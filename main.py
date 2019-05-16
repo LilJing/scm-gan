@@ -72,9 +72,11 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     train_iters = args.train_iters
     lamb = 0.9
     td_steps = 3
-    truncate_bptt = True
+    truncate_bptt = False
     enable_td = True
     learning_rate = .001
+    min_prediction_horizon = 3
+    max_prediction_horizon = 10
 
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=learning_rate)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
@@ -95,7 +97,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             torch.save(reward_predictor.state_dict(), 'model-reward_predictor.pth')
 
         theta = train_iter / train_iters
-        prediction_horizon = 4 + int(5 * theta)
+        pred_delta = max_prediction_horizon - min_prediction_horizon
+        prediction_horizon = min_prediction_horizon + int(pred_delta * theta)
 
         train_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
