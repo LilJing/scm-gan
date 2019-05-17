@@ -107,7 +107,8 @@ class Transition(nn.Module):
             x = DifferentiableBernoulliSampler.apply(x)
         else:
             # During test time, drop the sampling
-            x = (x > 0.5).type(x.type())
+            #x = (x > 0.5).type(x.type())
+            x = DifferentiableBernoulliSampler.apply(x)
 
         #ts.collect('Transition', time.time() - start_time)
         #ts.print_every(10)
