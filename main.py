@@ -236,8 +236,10 @@ def evaluate(datasource, encoder, decoder, transition, discriminator, reward_pre
     print('Evaluating networks...')
     test_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
+    experiment_name = args.load_from.split('_')[-1]
+
     generate_trajectory_video(datasource)
-    measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
+    measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim, experiment_name=experiment_name)
     visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
     visualize_reconstruction(datasource, encoder, decoder, transition, reward_predictor, train_iter=train_iter)
 
@@ -250,6 +252,9 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     # Initialize environment
     env = datasource.make_env()
 
+    evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim)
+    return
+
     # No-op through the first 3 frames for initial state estimation
     state = env.reset()
     no_op = 3
@@ -261,7 +266,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     state_list = [s_0, s_1, s_2]
 
     # Estimate initial state (given t=0,1,2 estimate state at t=2)
-    states = torch.Tensor(state_list).unsqueeze(0)
+    states = torch.Tensor(state_list).cuda().unsqueeze(0)
     z = encoder(states)
     z = transition(z, onehot(no_op))
 
@@ -307,7 +312,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         vid.write_frame(ftr_state, resize_to=(512,512), caption=caption)
 
         state_list = state_list[1:] + [ftr_state]
-        z = encoder(torch.Tensor(state_list).unsqueeze(0))
+        z = encoder(torch.Tensor(state_list).cuda().unsqueeze(0))
         z = transition(z, onehot(max_a))
         t += 1
         if t > 300:
@@ -692,8 +697,8 @@ def convert_ndim_image_to_rgb(x):
 
 
 def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred,
-                           train_iter=0, timesteps=40, num_factors=16, experiment_name=''):
-    batch_size = 1
+                           train_iter=0, timesteps=200, num_factors=16, experiment_name=''):
+    batch_size = 100
     start_time = time.time()
     num_actions = datasource.binary_input_channels
     num_rewards = datasource.scalar_output_channels
@@ -710,6 +715,7 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
 
     # Simulate the future, compare with reality
     mse_losses = []
+    mse_stddevs = []
     active_mask = torch.ones(batch_size).cuda()
     for t in range(2, timesteps):
         active_mask = active_mask * (1 - dones[:, t])
@@ -721,8 +727,10 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         predicted = torch.sigmoid(predicted)
         diffs = active_mask * ((expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
         rec_loss = torch.mean(diffs) * batch_size / torch.sum(active_mask)
+        rec_std = torch.std(diffs) * batch_size / torch.sum(active_mask)
         print('MSE t={} {:.04f}\n'.format(t, rec_loss))
         mse_losses.append(float(rec_loss))
+        mse_stddevs.append(float(rec_std))
 
         #mae_loss = torch.mean(torch.abs(expected - predicted))
         #print('MAE t={} {:.04f}\n'.format(t, mae_loss))
@@ -732,24 +740,43 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
     if len(mse_losses) == 0:
         print('Degenerate trajectory, skipping MSE calculation')
         return
-
-    filename = 'mse_iter_{:06d}.json'.format(train_iter)
-    with open(filename, 'w') as fp:
-        fp.write(json.dumps(mse_losses, indent=2))
     print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
+    print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
+
+    mse_filename = 'mse_iter_{}.json'.format(experiment_name)
+    with open(mse_filename, 'w') as fp:
+        fp.write(json.dumps(mse_losses, indent=2))
+    stddev_filename = 'mse_stddev_iter_{}.json'.format(experiment_name)
+    with open(stddev_filename, 'w') as fp:
+        fp.write(json.dumps(mse_stddevs, indent=2))
+
     plot_params = {
-        'title': 'MSE Loss {}'.format(experiment_name),
+        'title': 'Mean Squared Error Pixel Loss',
         'grid': True,
     }
     plt = pd.Series(mse_losses).plot(**plot_params)
     plt.set_ylim(ymin=0)
     plt.set_ylabel('Pixel MSE')
     plt.set_xlabel('Prediction horizon (timesteps)')
-    filename = 'mse_iter_{:06d}.png'.format(train_iter)
+
+    plot_mse(plt, mse_filename, stddev_filename)
+    plot_mse(plt, mse_filename, stddev_filename, facecolor='#00FF00', edgecolor='#00FF00')
+
+    filename = 'mse_graph.png'
     imutil.show(plt, filename=filename)
     from matplotlib import pyplot
     pyplot.close()
-    print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
+
+
+def plot_mse(plt, mean_filename, err_filename, facecolor='#BBBBFF', edgecolor='#0000FF'):
+    meanvals = np.array(json.load(open(mean_filename)))
+    errvals = np.array(json.load(open(err_filename)))
+
+    # Add shaded region to indicate stddev
+    x = np.array(range(len(meanvals)))
+    plt.plot(x, meanvals, color=edgecolor)
+    plt.fill_between(x, meanvals - errvals, meanvals + errvals,
+                     alpha=0.2, facecolor=facecolor, edgecolor=edgecolor)
 
 
 if __name__ == '__main__':

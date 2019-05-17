@@ -33,6 +33,7 @@ class BetterPongEnv():
         self.ball_velocity_x = random.choice([-3, -2, 2, +3])
         self.ball_velocity_y = random.choice([-3, -2, 2, +3])
         self.state = render_state(self.left_y, self.right_y, self.ball_x, self.ball_y, self.ball_velocity_x, self.ball_velocity_y)
+        return self.state
 
     # The agent can press one of four buttons
     def step(self, a):
