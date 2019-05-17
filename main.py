@@ -73,7 +73,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     lamb = 0.9
     td_steps = 3
     truncate_bptt = False
-    enable_td = True
+    enable_td = False
+    enable_latent_overshooting = True
     learning_rate = .001
     min_prediction_horizon = 3
     max_prediction_horizon = 10
@@ -122,6 +123,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
         loss = 0
         td_lambda_loss = 0
+        lo_loss = 0
+        lo_z_set = {}
         td_z_set = {}
         # Given the state encoded at t=2, predict state at t=3, t=4, ...
         for t in range(1, prediction_horizon - 1):
@@ -162,6 +165,22 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             loss += theta * t_l1_loss
             z = new_z
 
+            if enable_latent_overshooting:
+                # Latent Overshooting, Hafner et al.
+                lo_z_set[t] = encoder(states[:, t-1:t+2])
+
+                # For each previous t_left, step forward to t
+                for t_left in range(1, t):
+                    a = torch.eye(num_actions)[actions[:, t - 1]].cuda()
+                    lo_z_set[t_left] = transition(lo_z_set[t_left], a)
+                for t_a in range(2, t - 1):
+                    # It's like TD but only N:1 for all N
+                    predicted_activations = lo_z_set[t_a]
+                    target_activations = lo_z_set[t].detach()
+                    lo_loss_batch = latent_state_loss(target_activations, predicted_activations)
+                    lo_loss = torch.mean(lo_loss_batch * active_mask)
+                    lo_lambda_loss += lamb * lo_loss
+
             if not enable_td:
                 continue
 
@@ -186,7 +205,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 for t_b in range(t_a + 1, min(t_a + td_steps, t + 1)):
                     # Learn a guess, from a guess
                     predicted_activations = td_z_set[t_a]
-                    target_activations = td_z_set[t_b]
+                    target_activations = td_z_set[t_b].detach()
                     td_loss_batch = latent_state_loss(target_activations, predicted_activations)
                     td_loss = torch.mean(td_loss_batch * active_mask)
                     #ts.collect('TD {}:{}:{}'.format(t_a, t_b, t), td_lambda_loss)
@@ -198,6 +217,9 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     #r_loss = torch.mean(r_diffs * active_mask)
                     #td_lambda_loss += lamb ** (t_b - 1) * (td_loss + r_loss)
             # end TD time loop
+        if enable_latent_overshooting:
+            ts.collect('LO total', lo_loss)
+            loss += theta * lo_loss
         if enable_td:
             ts.collect('TD total', td_lambda_loss)
             loss += theta * td_lambda_loss
