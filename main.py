@@ -765,10 +765,10 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
     print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
-    mse_filename = 'mse_iter_{}.json'.format(experiment_name)
+    mse_filename = 'mse_{}_iter_{:06d}.json'.format(experiment_name, train_iter)
     with open(mse_filename, 'w') as fp:
         fp.write(json.dumps(mse_losses, indent=2))
-    stddev_filename = 'mse_stddev_iter_{}.json'.format(experiment_name)
+    stddev_filename = 'mse_stddev_{}_iter_{:06d}.json'.format(experiment_name, train_iter)
     with open(stddev_filename, 'w') as fp:
         fp.write(json.dumps(mse_stddevs, indent=2))
 
