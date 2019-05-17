@@ -258,7 +258,7 @@ def evaluate(datasource, encoder, decoder, transition, discriminator, reward_pre
     print('Evaluating networks...')
     test_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
-    experiment_name = args.load_from.split('_')[-1]
+    experiment_name = args.load_from.split('_')[-1] if args.load_from != '.' else 'default'
 
     generate_trajectory_video(datasource)
     measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim, experiment_name=experiment_name)
