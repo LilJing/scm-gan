@@ -26,14 +26,14 @@ class Env():
 
     # The agent can press one of four buttons
     def step(self, a):
-        # Move the red paddle up/down
+        # Move ball up/down
         if a == 0:
             self.ball_y -= 3
         elif a == 1:
             self.ball_y += 3
         self.ball_y = max(MARGIN_Y, min(self.ball_y, GAME_SIZE - MARGIN_Y))
 
-        # Move the blue paddle up/down
+        # Move ball left/right
         if a == 2:
             self.ball_x -= 3
         elif a == 3:
@@ -46,12 +46,10 @@ class Env():
         if self.ball_x >= GAME_SIZE:
             # Ball went right
             reward = 1
-            done = True
 
         if self.ball_x <= 0:
             # Ball went left
             reward = -1
-            done = True
 
         self.state = render_state(self.ball_x, self.ball_y)
         info = {}
