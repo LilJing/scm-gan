@@ -74,7 +74,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     td_steps = 3
     truncate_bptt = False
     enable_td = False
-    enable_latent_overshooting = True
+    enable_latent_overshooting = False
     learning_rate = .001
     min_prediction_horizon = 3
     max_prediction_horizon = 10
@@ -86,7 +86,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=learning_rate)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
 
-    for train_iter in range(0, train_iters):
+    for train_iter in range(0, train_iters + 1):
         if train_iter % 1000 == 0:
             print('Evaluating networks...')
             evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=train_iter)
@@ -178,8 +178,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     predicted_activations = lo_z_set[t_a]
                     target_activations = lo_z_set[t].detach()
                     lo_loss_batch = latent_state_loss(target_activations, predicted_activations)
-                    lo_loss = torch.mean(lo_loss_batch * active_mask)
-                    lo_lambda_loss += lamb * lo_loss
+                    lo_loss += lamb * torch.mean(lo_loss_batch * active_mask)
 
             if not enable_td:
                 continue
@@ -784,7 +783,7 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
     plot_mse(plt, mse_filename, stddev_filename)
     plot_mse(plt, mse_filename, stddev_filename, facecolor='#00FF00', edgecolor='#00FF00')
 
-    filename = 'mse_graph.png'
+    filename = 'mse_graph_iter_{:06d}.png'.format(train_iter)
     imutil.show(plt, filename=filename)
     from matplotlib import pyplot
     pyplot.close()

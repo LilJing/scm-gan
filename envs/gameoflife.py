@@ -6,7 +6,7 @@ from multi_env import MultiEnvironment
 from gym.spaces.discrete import Discrete
 
 CHANNELS = 1
-GAME_SIZE = 64
+GAME_SIZE = 32
 NUM_ACTIONS = 1
 NUM_REWARDS = 1
 
