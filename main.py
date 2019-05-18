@@ -30,6 +30,15 @@ parser.add_argument('--evaluate', action='store_true', help='If true, evaluate i
 parser.add_argument('--evaluations', type=int, default=1, help='Integer number of evaluations to run')
 parser.add_argument('--batch-size', type=int, default=32, help='Training batch size')
 parser.add_argument('--train-iters', type=int, default=10000, help='Number of iterations of training')
+
+parser.add_argument('--truncate-bptt', action='store_true', help='Train only with timestep-local information (training only)')
+parser.add_argument('--latent-overshooting', action='store_true', help='Train with Latent Overshooting from Hafner et al. (training only)')
+parser.add_argument('--latent-td', action='store_true', help='Train with the Temporal Difference objective (training only)')
+parser.add_argument('--td-lambda', type=float, help='Scalar lambda hyperparameter for TD or overshooting (training only)')
+parser.add_argument('--td-steps', type=int, default=3, help='Number of concurrent TD forward predictions (training only)')
+parser.add_argument('--horizon-min', type=int, default=3, help='Min timestep horizon value (training only)')
+parser.add_argument('--horizon-max', type=int, default=10, help='Max timestep horizon value (training only)')
+parser.add_argument('--learning-rate', type=float, default=.001, help='Adam lr value (training only)')
 args = parser.parse_args()
 
 
@@ -70,14 +79,14 @@ def train(latent_dim, datasource, num_actions, num_rewards,
           encoder, decoder, reward_predictor, discriminator, transition):
     batch_size = args.batch_size
     train_iters = args.train_iters
-    lamb = 0.9
-    td_steps = 3
-    truncate_bptt = False
-    enable_td = False
-    enable_latent_overshooting = False
-    learning_rate = .001
-    min_prediction_horizon = 3
-    max_prediction_horizon = 10
+    lamb = args.td_lambda
+    td_steps = args.td_steps
+    truncate_bptt = args.truncate_bptt
+    enable_td = args.latent_td
+    enable_latent_overshooting = args.latent_overshooting
+    learning_rate = args.learning_rate
+    min_prediction_horizon = args.horizon_min
+    max_prediction_horizon = args.horizon_max
 
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=learning_rate)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
