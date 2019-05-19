@@ -33,7 +33,7 @@ parser.add_argument('--train-iters', type=int, default=10000, help='Number of it
 parser.add_argument('--truncate-bptt', action='store_true', help='Train only with timestep-local information (training only)')
 parser.add_argument('--latent-overshooting', action='store_true', help='Train with Latent Overshooting from Hafner et al. (training only)')
 parser.add_argument('--latent-td', action='store_true', help='Train with the Temporal Difference objective (training only)')
-parser.add_argument('--td-lambda', type=float, help='Scalar lambda hyperparameter for TD or overshooting (training only)')
+parser.add_argument('--td-lambda', type=float, default=0.9, help='Scalar lambda hyperparameter for TD or overshooting (training only)')
 parser.add_argument('--td-steps', type=int, default=3, help='Number of concurrent TD forward predictions (training only)')
 parser.add_argument('--horizon-min', type=int, default=3, help='Min timestep horizon value (training only)')
 parser.add_argument('--horizon-max', type=int, default=10, help='Max timestep horizon value (training only)')

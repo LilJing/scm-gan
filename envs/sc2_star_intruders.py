@@ -17,7 +17,7 @@ MAX_EPISODES_PER_ENVIRONMENT = 500
 NUM_ACTIONS = 4
 NUM_REWARDS = 2
 NO_OP_ACTION = 0
-RGB_SIZE = 256
+SCREEN_SIZE = 64
 MAP_NAME = 'StarIntruders'
 
 replay_buffer = []
@@ -32,7 +32,7 @@ def init():
     global env
     global initialized
     global sim_thread
-    env = StarIntrudersEnvironment(map_name=MAP_NAME)
+    env = StarIntrudersEnvironment(map_name=MAP_NAME, screen_size=SCREEN_SIZE)
     sim_thread = Thread(target=play_game_thread)
     sim_thread.daemon = True  # hack to kill on ctrl+C
     sim_thread.start()
@@ -144,12 +144,12 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True):
 
 def convert_frame(state):
     feature_map, feature_screen, rgb_map, rgb_screen = state
-    rgb_screen = rgb_screen.transpose(2, 0, 1)
-    return feature_screen, rgb_screen / 255.
+    rgb_screen = imutil.get_pixels(rgb_screen).transpose(2, 0, 1)
+    return feature_screen, rgb_screen
 
 
 if __name__ == '__main__':
-    env = ZoneIntrudersEnvironment()
+    env = StarIntrudersEnvironment(map_name=MAP_NAME, screen_size=SCREEN_SIZE)
     while True:
         simulate_to_replay_buffer(1)
         import pdb; pdb.set_trace()
