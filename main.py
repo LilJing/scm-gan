@@ -27,6 +27,7 @@ parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-
 parser.add_argument('--load-from', required=True, help='Directory containing .pth models (default: .)')
 parser.add_argument('--evaluate', action='store_true', help='If true, evaluate instead of training')
 parser.add_argument('--evaluations', type=int, default=1, help='Integer number of evaluations to run')
+parser.add_argument('--title', type=str, help='Name of experiment in output figures')
 parser.add_argument('--batch-size', type=int, default=32, help='Training batch size')
 parser.add_argument('--train-iters', type=int, default=10000, help='Number of iterations of training')
 
@@ -726,12 +727,12 @@ def convert_ndim_image_to_rgb(x):
 
 
 def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred,
-                           train_iter=0, timesteps=200, num_factors=16, experiment_name=''):
+                           train_iter=0, timesteps=41, num_factors=16, experiment_name=''):
     batch_size = 100
     start_time = time.time()
     num_actions = datasource.binary_input_channels
     num_rewards = datasource.scalar_output_channels
-    states, rewards, dones, actions = datasource.get_trajectories(batch_size=batch_size, timesteps=timesteps, random_start=False, training=False)
+    states, rewards, dones, actions = datasource.get_trajectories(batch_size=batch_size, timesteps=timesteps)
     states = torch.Tensor(states).cuda()
     rewards = torch.Tensor(rewards).cuda()
     dones = torch.Tensor(dones.astype(int)).cuda()
@@ -780,7 +781,7 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         fp.write(json.dumps(mse_stddevs, indent=2))
 
     plot_params = {
-        'title': 'Mean Squared Error Pixel Loss',
+        'title': 'Mean Squared Error Pixel Loss: {}'.format(args.title),
         'grid': True,
     }
     plt = pd.Series(mse_losses).plot(**plot_params)
