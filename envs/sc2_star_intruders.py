@@ -20,7 +20,8 @@ NO_OP_ACTION = 0
 SCREEN_SIZE = 64
 MAP_NAME = 'StarIntruders'
 
-replay_buffer = []
+replay_buffer_training = []
+replay_buffer_testing = []
 initialized = False
 simulation_iters = 0
 env = None
@@ -44,8 +45,8 @@ def play_game_thread():
     while True:
         simulate_to_replay_buffer(1)
         if simulation_iters % 100 == 1:
-            print('\nSimulator thread has simulated {} trajectories. Replay buffer size is {}'.format(
-                simulation_iters, len(replay_buffer)))
+            print('\nSimulator thread has simulated {} trajectories. Replay buffer len training {}, testing {}'.format(
+                simulation_iters, len(replay_buffer_training), len(replay_buffer_testing)))
         if simulation_iters > 0 and simulation_iters % MAX_EPISODES_PER_ENVIRONMENT == 0:
             del env
             init()
@@ -89,7 +90,9 @@ def play_episode(env, policy):
     add_to_replay_buffer(trajectory)
 
 
-def add_to_replay_buffer(episode):
+def add_to_replay_buffer(episode, test_set_holdout=0.20):
+    replay_buffer = replay_buffer_training if np.random.random() > test_set_holdout else replay_buffer_testing
+
     if len(replay_buffer) < REPLAY_BUFFER_LEN:
         replay_buffer.append(episode)
     else:
@@ -97,13 +100,15 @@ def add_to_replay_buffer(episode):
         replay_buffer[idx] = episode
 
 
-def get_trajectories(batch_size=8, timesteps=10, random_start=True):
+def get_trajectories(batch_size=8, timesteps=10, random_start=True, training=True):
     if not initialized:
         init()
 
     if not sim_thread.is_alive():
         print('Error: Simulator thread has died!')
         raise Exception('Simulator thread crashed')
+
+    replay_buffer = replay_buffer_training if training else replay_buffer_testing
 
     # Run the game and add new episodes into the replay buffer
     while len(replay_buffer) < MIN_REPLAY_BUFFER_LEN:
