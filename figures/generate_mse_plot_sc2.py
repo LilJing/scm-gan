@@ -25,7 +25,7 @@ def plot_mse(plt, mean_filename, err_filename, facecolor='#BBBBFF', edgecolor='#
     if not already_plotted:
         plt.plot(x, meanvals, color=edgecolor, label=label)
     plt.fill_between(x, meanvals - errvals, meanvals + errvals,
-                     alpha=0.2, facecolor=facecolor, edgecolor=edgecolor)
+                     alpha=0.1, facecolor=facecolor, edgecolor=edgecolor)
 
 
 input_specs = [
