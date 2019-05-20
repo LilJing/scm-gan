@@ -16,38 +16,63 @@ import pandas as pd
 from matplotlib import pyplot
 
 
-def plot_mse(plt, mean_filename, err_filename, facecolor='#BBBBFF', edgecolor='#0000FF'):
+def plot_mse(plt, mean_filename, err_filename, facecolor='#BBBBFF', edgecolor='#0000FF', label='', already_plotted=False):
     meanvals = np.array(json.load(open(mean_filename)))
     errvals = np.array(json.load(open(err_filename)))
 
     # Add shaded region to indicate stddev
     x = np.array(range(len(meanvals)))
-    plt.plot(x, meanvals, color=edgecolor)
+    if not already_plotted:
+        plt.plot(x, meanvals, color=edgecolor, label=label)
     plt.fill_between(x, meanvals - errvals, meanvals + errvals,
                      alpha=0.2, facecolor=facecolor, edgecolor=edgecolor)
 
 
-# Usage: generate_mse_plot.py /path/to/experiment1/mse_iter_1000.json /path/to/experiment2/mse_iter_1000.json
-data_files = sys.argv[1:]
-
-data_files = [
-    '/mnt/nfs/experiments/default/scm-gan_649a849f/mse_iter_099000.json',
+input_specs = [
+    {
+        'title': 'Baseline',
+        'mean': '/mnt/nfs/experiments/default/scm-gan_547306a3/mse_b5d15e43_iter_040000.json',
+        'stddev': '/mnt/nfs/experiments/default/scm-gan_547306a3/mse_stddev_b5d15e43_iter_040000.json',
+    }, {
+        'title': 'Latent Overshooting',
+        'mean': '/mnt/nfs/experiments/default/scm-gan_a8a9d765/mse_987ffc2c_iter_040000.json',
+        'stddev': '/mnt/nfs/experiments/default/scm-gan_a8a9d765/mse_stddev_987ffc2c_iter_040000.json',
+    }, {
+        'title': 'TD',
+        'mean': '/mnt/nfs/experiments/default/scm-gan_531331ef/mse_b5d15e43_iter_040000.json',
+        'stddev': '/mnt/nfs/experiments/default/scm-gan_531331ef/mse_stddev_b5d15e43_iter_040000.json',
+    }
 ]
 
+def load_data(spec):
+    result = {}
+    result['title'] = spec['title']
+    result['mean'] = np.array(json.load(open(spec['mean'])))
+    result['stddev'] = np.array(json.load(open(spec['stddev'])))
+    return result
 
-mse_losses = np.array(json.load(open(data_files[0])))
+data_dicts = [load_data(spec) for spec in input_specs]
+colors = ['#FF0000', '#00FF00', '#0000FF']
+
+
+# Hack: Plot the first series just to get an axis, THEN plot all the rest
 plot_params = {
-    'title': 'Mean Squared Error Pixel Loss',
+    'title': 'Mean Squared Error: StarIntruders Task',
     'grid': True,
+    'label': input_specs[0]['title'],
+    'color': colors[0],
 }
-plt = pd.Series(mse_losses).plot(**plot_params)
+plt = pd.Series(data_dicts[0]['mean']).plot(**plot_params)
 plt.set_ylim(ymin=0)
 plt.set_ylabel('Pixel MSE')
 plt.set_xlabel('Prediction horizon (timesteps)')
 
-plot_mse(plt, mse_filename, stddev_filename, facecolor='0000FF', edgecolor='0000FF')
-plot_mse(plt, mse_filename, stddev_filename, facecolor='00FF00', edgecolor='00FF00')
-plot_mse(plt, mse_filename, stddev_filename, facecolor='FF0000', edgecolor='FF0000')
+# Now plot all the lines
+for spec, color in zip(input_specs, colors):
+    already_plotted = spec['title'] == input_specs[0]['title']
+    plot_mse(plt, spec['mean'], spec['stddev'], facecolor=color, edgecolor=color, label=spec['title'], already_plotted=already_plotted)
+
+plt.legend(loc='bottom right')
 
 filename = 'mse_graph.png'
 imutil.show(plt, filename=filename)
