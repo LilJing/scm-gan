@@ -7,6 +7,12 @@ from envs import gameoflife
 def allocate_datasource(datasource_name):
     if datasource_name == 'sc2_star_intruders':
         return SC2StarIntruders()
+    elif datasource_name == 'sc2_star_intruders_variant_a':
+        return SC2StarIntruders('StarIntrudersVariantA')
+    elif datasource_name == 'sc2_star_intruders_variant_b':
+        return SC2StarIntruders('StarIntrudersVariantB')
+    elif datasource_name == 'sc2_star_intruders_variant_c':
+        return SC2StarIntruders('StarIntrudersVariantC')
     elif datasource_name == 'pong':
         return Pong()
     elif datasource_name == 'gridworld':
@@ -25,14 +31,18 @@ class Datasource():
 
 
 class SC2StarIntruders(Datasource):
-    def __init__(self):
+    def __init__(self, map_name=None):
+        # global map filename hack
+        if map_name:
+            sc2_star_intruders.MAP_NAME = map_name
+        self.map_name = map_name
         self.binary_input_channels = sc2_star_intruders.NUM_ACTIONS
         self.scalar_output_channels = sc2_star_intruders.NUM_REWARDS
         self.conv_input_channels = 4
         self.conv_output_channels = 4
 
     def make_env(self):
-        return sc2_star_intruders.StarIntrudersEnvironment()
+        return sc2_star_intruders.StarIntrudersEnvironment(map_name=self.map_name)
 
     def convert_frame(self, state):
         return sc2_star_intruders.convert_frame(state)
