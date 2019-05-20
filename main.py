@@ -217,7 +217,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     td_loss_batch = latent_state_loss(target_activations, predicted_activations)
                     td_loss = torch.mean(td_loss_batch * active_mask)
                     #ts.collect('TD {}:{}:{}'.format(t_a, t_b, t), td_lambda_loss)
-                    td_lambda_loss += lamb ** (t_b - 1) * td_loss
+                    td_lambda_loss += lamb ** (t_b - t_a - 1) * td_loss
                     # TD including reward
                     #r_expected = reward_predictor(expected)
                     #r_actual = reward_predictor(actual)
