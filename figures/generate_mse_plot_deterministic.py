@@ -18,26 +18,57 @@ from matplotlib import pyplot
 
 
 file_prefix = '/mnt/nfs/experiments/default/'
-eval_at_iter = 150000
-plot_title = 'StarIntruders, Stochastic Model'
+eval_at_iter = 10000
+plot_title = 'Pong, Deterministic Model'
 
 input_specs = [
     # Stochastic models (bernoulli)
+#    {
+#        'title': 'BPTT +L1',
+#        'experiment_id': 'scm-gan_810b894e',
+#        'color': '#FF0000',
+#    },
+#    {
+#        'title': 'BPTT +L1 +LO',
+#        'experiment_id': 'scm-gan_eaa68b1c',
+#        'color': '#00FF00',
+#    },
+#    {
+#        'title': 'BPTT +L1 +TD',
+#        'experiment_id': 'scm-gan_63175501',
+#        'color': '#2222FF',
+#    },
+    # Deterministic models
     {
-        'title': 'BPTT +L1',
-        'experiment_id': 'scm-gan_547306a3',
-        'color': '#2222FF',
+        'title': 'BPTT (baseline)',
+        'experiment_id': 'scm-gan_3c02865d',
+        'color': '#550000',
     },
     {
-        'title': 'BPTT +L1 +TD',
-        'experiment_id': 'scm-gan_531331ef',
+        'title': 'BPTT +LO',
+        'experiment_id': 'scm-gan_65022c52',
+        'color': '#005500',
+    },
+    {
+        'title': 'BPTT +TD',
+        'experiment_id': 'scm-gan_6788ea40',
         'color': '#000055',
     },
     {
-        'title': 'BPTT +L1 +LO',
-        'experiment_id': 'scm-gan_a8a9d765',
+        'title': 'BPTT +L1',
+        'experiment_id': 'scm-gan_9e128ad8',
         'color': '#FF2222',
     },
+#    {
+#        'title': 'BPTT +L1 + LO',
+#        'experiment_id': 'scm-gan_d788b8f3',
+#        'color': '#22FF22',
+#    },
+#    {
+#        'title': 'BPTT +L1 +TD',
+#        'experiment_id': 'scm-gan_bd9540a5',
+#        'color': '#2222FF',
+#    },
 ]
 
 def load_data(spec):
