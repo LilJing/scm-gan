@@ -539,7 +539,7 @@ def compute_causal_edge_weights(src_z, transition, onehot_a):
 def visualize_reconstruction(datasource, encoder, decoder, transition, reward_predictor, train_iter=0):
     num_actions = datasource.binary_input_channels
     num_rewards = datasource.scalar_output_channels
-    timesteps = 15
+    timesteps = 45
     batch_size = 1
     states, rewards, dones, actions = datasource.get_trajectories(batch_size, timesteps, random_start=False)
     states = torch.Tensor(states).cuda()
@@ -696,6 +696,11 @@ def simulate_trajectory_from_actions(z, decoder, reward_pred, transition,
 
         # Visualize factors and reward mask
         ftr_pixels = composite_rgb_reward_factor_image(x_t_pixels, reward_map, z)
+
+        gt_state = states[0, t].mean(0) * 255
+        true_pixels = imutil.get_pixels(gt_state, 512, 512, img_padding=8, normalize=False)
+
+        ftr_pixels = np.concatenate([true_pixels, ftr_pixels], axis=1)
         ftr_vid.write_frame(ftr_pixels, caption=caption, normalize=False)
 
         # Visualize each separate factor
@@ -727,7 +732,7 @@ def convert_ndim_image_to_rgb(x):
 
 
 def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred,
-                           train_iter=0, timesteps=41, num_factors=16, experiment_name=''):
+                           train_iter=0, timesteps=100, num_factors=16, experiment_name=''):
     batch_size = 100
     start_time = time.time()
     num_actions = datasource.binary_input_channels
