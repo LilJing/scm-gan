@@ -732,7 +732,7 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
     start_time = time.time()
     num_actions = datasource.binary_input_channels
     num_rewards = datasource.scalar_output_channels
-    states, rewards, dones, actions = datasource.get_trajectories(batch_size=batch_size, timesteps=timesteps)
+    states, rewards, dones, actions = datasource.get_trajectories(batch_size=batch_size, timesteps=timesteps, training=False)
     states = torch.Tensor(states).cuda()
     rewards = torch.Tensor(rewards).cuda()
     dones = torch.Tensor(dones.astype(int)).cuda()

@@ -112,7 +112,8 @@ def draw_rect(pixels, center_x, center_y, width, height, color):
     pixels[color, top:bottom, left:right] = 1
 
 
-def get_trajectories(batch_size=32, timesteps=10, policy='random', random_start=False):
+# Note: In this env, training=True has no effect. All trajectories are test set trajectories.
+def get_trajectories(batch_size=32, timesteps=10, policy='random', random_start=False, training=False):
     envs = MultiEnvironment([BetterPongEnv() for _ in range(batch_size)])
     t_states, t_rewards, t_dones, t_actions = [], [], [], []
     # Initial actions/stats
