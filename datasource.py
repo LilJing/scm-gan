@@ -26,8 +26,10 @@ def allocate_datasource(datasource_name):
 class Datasource():
     def __init__(self):
         pass
+
     def convert_frame(self, state):
-        return state
+        # Returns a two-tuple: network state, human-interpretable state
+        return state, state
 
 
 class SC2StarIntruders(Datasource):
@@ -42,7 +44,7 @@ class SC2StarIntruders(Datasource):
         self.conv_output_channels = 4
 
     def make_env(self):
-        return sc2_star_intruders.StarIntrudersEnvironment(map_name=self.map_name)
+        return sc2_star_intruders.make_env()
 
     def convert_frame(self, state):
         return sc2_star_intruders.convert_frame(state)

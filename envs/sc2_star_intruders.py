@@ -28,12 +28,16 @@ policy = None
 sim_thread = None
 
 
-def init():
+def make_env():
     from sc2env.environments.star_intruders import StarIntrudersEnvironment
+    return StarIntrudersEnvironment(map_name=MAP_NAME, screen_size=SCREEN_SIZE)
+
+
+def init():
     global env
     global initialized
     global sim_thread
-    env = StarIntrudersEnvironment(map_name=MAP_NAME, screen_size=SCREEN_SIZE)
+    env = make_env()
     sim_thread = Thread(target=play_game_thread)
     sim_thread.daemon = True  # hack to kill on ctrl+C
     sim_thread.start()
@@ -154,8 +158,7 @@ def convert_frame(state):
 
 
 if __name__ == '__main__':
-    from sc2env.environments.star_intruders import StarIntrudersEnvironment
-    env = StarIntrudersEnvironment(map_name=MAP_NAME, screen_size=SCREEN_SIZE)
+    env = make_env()
     while True:
         simulate_to_replay_buffer(1)
         import pdb; pdb.set_trace()
