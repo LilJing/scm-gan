@@ -67,6 +67,7 @@ def main():
         reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward_predictor.pth')))
 
     if args.evaluate:
+        evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim)
         for _ in range(args.evaluations):
             play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
                  reward_predictor, discriminator, transition)
@@ -281,8 +282,6 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
 
     # Initialize environment
     env = datasource.make_env()
-
-    evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim)
 
     # No-op through the first 3 frames for initial state estimation
     state = env.reset()
