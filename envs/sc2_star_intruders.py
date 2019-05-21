@@ -149,7 +149,7 @@ def get_trajectories(batch_size=8, timesteps=10, random_start=True, training=Tru
 
 def convert_frame(state):
     feature_map, feature_screen, rgb_map, rgb_screen = state
-    rgb_screen = imutil.get_pixels(rgb_screen).transpose(2, 0, 1)
+    rgb_screen = imutil.get_pixels(rgb_screen)
     return feature_screen, rgb_screen
 
 

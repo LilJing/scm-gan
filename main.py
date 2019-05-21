@@ -283,16 +283,15 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     env = datasource.make_env()
 
     evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim)
-    return
 
     # No-op through the first 3 frames for initial state estimation
     state = env.reset()
     no_op = 3
-    s_0 = datasource.convert_frame(state)
+    s_0, _ = datasource.convert_frame(state)
     state, reward, done, info = env.step(no_op)
-    s_1 = datasource.convert_frame(state)
+    s_1, _ = datasource.convert_frame(state)
     state, reward, done, info = env.step(no_op)
-    s_2 = datasource.convert_frame(state)
+    s_2, _ = datasource.convert_frame(state)
     state_list = [s_0, s_1, s_2]
 
     # Estimate initial state (given t=0,1,2 estimate state at t=2)
@@ -335,11 +334,11 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         true_reward += new_reward
 
         # Re-estimate state
-        ftr_state = datasource.convert_frame(new_state)
+        ftr_state, rgb_state = datasource.convert_frame(new_state)
         print('t={} curr. r={:.02f} future r: {:.02f} {:.02f} {:.02f} {:.02f}'.format(t, true_reward, rewards[0], rewards[1], rewards[2], rewards[3]))
         caption = 'HUMANS DESTROYED: {}    ALIENS DESTROYED: {}'.format(int(humans_killed), int(aliens_killed))
         print(caption)
-        vid.write_frame(ftr_state, resize_to=(512,512), caption=caption)
+        vid.write_frame(rgb_state, resize_to=(512,512), caption=caption)
 
         state_list = state_list[1:] + [ftr_state]
         z = encoder(torch.Tensor(state_list).cuda().unsqueeze(0))
