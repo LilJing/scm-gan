@@ -24,7 +24,7 @@ from utils import cov
 
 parser = argparse.ArgumentParser(description="Learn to model a sequential environment")
 parser.add_argument('--env', required=True, help='One of: boxes, minipong, Pong-v0, etc (see envs/ for list)')
-parser.add_argument('--load-from', required=True, help='Directory containing .pth models (default: .)')
+parser.add_argument('--load-from', type=str, help='Directory containing .pth models to load before starting')
 parser.add_argument('--evaluate', action='store_true', help='If true, evaluate instead of training')
 parser.add_argument('--evaluations', type=int, default=1, help='Integer number of evaluations to run')
 parser.add_argument('--title', type=str, help='Name of experiment in output figures')
@@ -57,14 +57,18 @@ def main():
     discriminator = (models.Discriminator())
     transition = (models.Transition(latent_dim, num_actions))
 
-    load_from_dir = args.load_from or '.'
-    if load_from_dir is not None and 'model-encoder.pth' in os.listdir(load_from_dir):
-        print('Loading models from directory {}'.format(load_from_dir))
-        encoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-encoder.pth')))
-        decoder.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-decoder.pth')))
-        transition.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-transition.pth')))
-        discriminator.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-discriminator.pth')))
-        reward_predictor.load_state_dict(torch.load(os.path.join(load_from_dir, 'model-reward_predictor.pth')))
+    if args.load_from is None:
+        print('No --load-from directory specified: initializing new networks')
+    elif 'model-encoder.pth' not in os.listdir(args.load_from):
+        print('Error: Failed to load saved models from directory {}'.format(args.load_from))
+        raise ValueError('Failed to load weights from *.pth')
+    else:
+        print('Loading models from directory {}'.format(args.load_from))
+        encoder.load_state_dict(torch.load(os.path.join(args.load_from, 'model-encoder.pth')))
+        decoder.load_state_dict(torch.load(os.path.join(args.load_from, 'model-decoder.pth')))
+        transition.load_state_dict(torch.load(os.path.join(args.load_from, 'model-transition.pth')))
+        discriminator.load_state_dict(torch.load(os.path.join(args.load_from, 'model-discriminator.pth')))
+        reward_predictor.load_state_dict(torch.load(os.path.join(args.load_from, 'model-reward_predictor.pth')))
 
     if args.evaluate:
         evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim)
@@ -267,10 +271,8 @@ def evaluate(datasource, encoder, decoder, transition, discriminator, reward_pre
     print('Evaluating networks...')
     test_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
-    experiment_name = args.load_from.split('_')[-1] if args.load_from != '.' else 'default'
-
-    generate_trajectory_video(datasource)
-    measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim, experiment_name=experiment_name)
+    timestamp = str(int(time.time()))
+    measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
     visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
     visualize_reconstruction(datasource, encoder, decoder, transition, reward_predictor, train_iter=train_iter)
 
@@ -298,12 +300,12 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     z = encoder(states)
     z = transition(z, onehot(no_op))
 
-    true_reward = 0
+    cumulative_reward = 0
     filename = 'SimpleRolloutAgent-{}.mp4'.format(int(time.time()))
     vid = imutil.Video(filename, framerate=12)
     t = 2
-    humans_killed = 0
-    aliens_killed = 0
+    cumulative_negative_reward = 0
+    cumulative_positive_reward = 0
     while not done:
         z = z.detach()
         # In simulation, compute all possible futures to select the best action
@@ -328,14 +330,18 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
 
         # Take the best action, in real life
         new_state, new_reward, done, info = env.step(max_a)
-        humans_killed -= info['total_damage_taken']
-        aliens_killed += info['enemy_value_killed']
-        true_reward += new_reward
+
+        positive_reward = sum(v for v in info.values() if v > 0)
+        negative_reward = sum(v for v in info.values() if v < 0)
+
+        cumulative_positive_reward += positive_reward
+        cumulative_negative_reward -= negative_reward
+        cumulative_reward += new_reward
 
         # Re-estimate state
         ftr_state, rgb_state = datasource.convert_frame(new_state)
-        print('t={} curr. r={:.02f} future r: {:.02f} {:.02f} {:.02f} {:.02f}'.format(t, true_reward, rewards[0], rewards[1], rewards[2], rewards[3]))
-        caption = 'HUMANS DESTROYED: {}    ALIENS DESTROYED: {}'.format(int(humans_killed), int(aliens_killed))
+        print('t={} curr. r={:.02f} future r: {:.02f} {:.02f} {:.02f} {:.02f}'.format(t, cumulative_reward, rewards[0], rewards[1], rewards[2], rewards[3]))
+        caption = 'Negative Reward: {}    Positive Reward: {}'.format(int(cumulative_negative_reward), int(cumulative_positive_reward))
         print(caption)
         vid.write_frame(rgb_state, resize_to=(512,512), caption=caption)
 
@@ -347,7 +353,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
             print('Ending evaluation due to time limit')
             break
     vid.finish()
-    msg = 'Finished at t={} with cumulative reward {}'.format(t, true_reward)
+    msg = 'Finished at t={} with cumulative reward {}'.format(t, cumulative_reward)
     with open('evaluation_metrics_{}.txt'.format(int(time.time())), 'w') as fp:
         fp.write(msg + '\n')
     print(msg)
@@ -730,7 +736,7 @@ def convert_ndim_image_to_rgb(x):
 
 
 def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred,
-                           train_iter=0, timesteps=100, num_factors=16, experiment_name=''):
+                           train_iter=0, timesteps=100, num_factors=16, experiment_name='default'):
     batch_size = 100
     start_time = time.time()
     num_actions = datasource.binary_input_channels
