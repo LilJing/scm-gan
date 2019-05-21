@@ -8,7 +8,6 @@ from threading import Thread
 import imutil
 import gym
 
-from sc2env.environments.star_intruders import StarIntrudersEnvironment
 
 REPLAY_BUFFER_LEN = 50
 MIN_REPLAY_BUFFER_LEN = 4
@@ -30,6 +29,7 @@ sim_thread = None
 
 
 def init():
+    from sc2env.environments.star_intruders import StarIntrudersEnvironment
     global env
     global initialized
     global sim_thread
@@ -154,6 +154,7 @@ def convert_frame(state):
 
 
 if __name__ == '__main__':
+    from sc2env.environments.star_intruders import StarIntrudersEnvironment
     env = StarIntrudersEnvironment(map_name=MAP_NAME, screen_size=SCREEN_SIZE)
     while True:
         simulate_to_replay_buffer(1)
