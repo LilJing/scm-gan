@@ -75,9 +75,11 @@ def main():
         for _ in range(args.evaluations):
             play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
                  reward_predictor, discriminator, transition)
+        print('Finished {} evaluations'.format(args.evaluations))
     else:
         train(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
               reward_predictor, discriminator, transition)
+    print('Finished execution, terminating')
 
 
 def train(latent_dim, datasource, num_actions, num_rewards,
