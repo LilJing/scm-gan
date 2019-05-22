@@ -39,7 +39,7 @@ def init():
     global sim_thread
     env = make_env()
     sim_thread = Thread(target=play_game_thread)
-    #sim_thread.daemon = True  # hack to kill on ctrl+C
+    sim_thread.daemon = True  # hack to kill on ctrl+C
     sim_thread.start()
     initialized = True
 
