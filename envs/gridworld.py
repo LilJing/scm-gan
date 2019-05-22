@@ -23,6 +23,7 @@ class Env():
         self.ball_x = np.random.randint(0 + MARGIN_X, GAME_SIZE - MARGIN_X)
         self.ball_y = np.random.randint(0 + MARGIN_Y, GAME_SIZE - MARGIN_Y)
         self.state = render_state(self.ball_x, self.ball_y)
+        return self.state
 
     # The agent can press one of four buttons
     def step(self, a):
@@ -52,7 +53,7 @@ class Env():
             reward = -1
 
         self.state = render_state(self.ball_x, self.ball_y)
-        info = {}
+        info = {'reward': reward}
         return self.state, reward, done, info
 
 
