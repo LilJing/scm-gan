@@ -28,9 +28,9 @@ policy = None
 sim_thread = None
 
 
-def make_env():
+def make_env(map_name=MAP_NAME, screen_size=SCREEN_SIZE):
     from sc2env.environments.star_intruders import StarIntrudersEnvironment
-    return StarIntrudersEnvironment(map_name=MAP_NAME, screen_size=SCREEN_SIZE)
+    return StarIntrudersEnvironment(map_name=map_name, screen_size=screen_size)
 
 
 def init():

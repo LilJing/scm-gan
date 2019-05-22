@@ -43,8 +43,8 @@ class SC2StarIntruders(Datasource):
         self.conv_input_channels = 4
         self.conv_output_channels = 4
 
-    def make_env(self):
-        return sc2_star_intruders.make_env()
+    def make_env(self, *args, **kwargs):
+        return sc2_star_intruders.make_env(*args, **kwargs)
 
     def convert_frame(self, state):
         return sc2_star_intruders.convert_frame(state)
