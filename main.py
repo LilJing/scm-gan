@@ -71,7 +71,7 @@ def main():
         reward_predictor.load_state_dict(torch.load(os.path.join(args.load_from, 'model-reward_predictor.pth')))
 
     if args.evaluate:
-        evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim)
+        evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, use_training_set=True)
         for _ in range(args.evaluations):
             play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
                  reward_predictor, discriminator, transition)
@@ -151,7 +151,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             actual_reward = rewards[:, t]
             reward_difference = torch.mean(torch.mean((expected_reward - actual_reward)**2, dim=1) * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += .0001 * reward_difference  # Normalize by height * width
+            loss += theta * .001 * reward_difference  # Normalize by height * width
 
             # Reconstruction loss
             target_pixels = states[:, t]
@@ -269,12 +269,12 @@ def decoder_pixel_loss(target, predicted):
     return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
 
-def evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=0):
+def evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=0, use_training_set=False):
     print('Evaluating networks...')
     test_mode([encoder, decoder, transition, discriminator, reward_predictor])
 
     timestamp = str(int(time.time()))
-    measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
+    measure_prediction_mse(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim, use_training_set=use_training_set)
     visualize_forward_simulation(datasource, encoder, decoder, transition, reward_predictor, train_iter, num_factors=latent_dim)
     visualize_reconstruction(datasource, encoder, decoder, transition, reward_predictor, train_iter=train_iter)
 
@@ -285,7 +285,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
          reward_predictor, discriminator, transition):
 
     # Initialize environment
-    env = datasource.make_env()
+    env = datasource.make_env(screen_size=512)
 
     # No-op through the first 3 frames for initial state estimation
     state = env.reset()
@@ -738,12 +738,13 @@ def convert_ndim_image_to_rgb(x):
 
 
 def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred,
-                           train_iter=0, timesteps=100, num_factors=16, experiment_name='default'):
+                           train_iter=0, timesteps=100, num_factors=16, experiment_name='default',
+                           use_training_set=False):
     batch_size = 100
     start_time = time.time()
     num_actions = datasource.binary_input_channels
     num_rewards = datasource.scalar_output_channels
-    states, rewards, dones, actions = datasource.get_trajectories(batch_size=batch_size, timesteps=timesteps, training=False)
+    states, rewards, dones, actions = datasource.get_trajectories(batch_size=batch_size, timesteps=timesteps, training=use_training_set)
     states = torch.Tensor(states).cuda()
     rewards = torch.Tensor(rewards).cuda()
     dones = torch.Tensor(dones.astype(int)).cuda()
