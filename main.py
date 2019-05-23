@@ -86,7 +86,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
           encoder, decoder, reward_predictor, discriminator, transition):
     batch_size = args.batch_size
     train_iters = args.train_iters
-    lamb = args.td_lambda
+    td_lambda_coef = args.td_lambda
     td_steps = args.td_steps
     truncate_bptt = args.truncate_bptt
     enable_td = args.latent_td
@@ -137,6 +137,10 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         # Keep track of "done" states to stop a training trajectory at the final time step
         active_mask = torch.ones(batch_size).cuda()
 
+        REWARD_COEF = .001
+        ACTIVATION_L1_COEF = .05
+        TRANSITION_L1_COEF = .05
+
         loss = 0
         td_lambda_loss = 0
         lo_loss = 0
@@ -151,7 +155,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             actual_reward = rewards[:, t]
             reward_difference = torch.mean(torch.mean((expected_reward - actual_reward)**2, dim=1) * active_mask)
             ts.collect('Rd Loss t={}'.format(t), reward_difference)
-            loss += theta * .001 * reward_difference  # Normalize by height * width
+            loss += theta * REWARD_COEF * reward_difference  # Normalize by height * width
 
             # Reconstruction loss
             target_pixels = states[:, t]
@@ -167,7 +171,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
             # Apply activation L1 loss
             l1_values = z.abs().mean(-1).mean(-1).mean(-1)
-            l1_loss = .05 * torch.mean(l1_values * active_mask)
+            l1_loss = ACTIVATION_L1_COEF * torch.mean(l1_values * active_mask)
             ts.collect('L1 t={}'.format(t), l1_loss)
             loss += theta * l1_loss
 
@@ -176,7 +180,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             new_z = transition(z, onehot_a)
             # Apply transition L1 loss
             t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
-            t_l1_loss = .05 * torch.mean(t_l1_values * active_mask)
+            t_l1_loss = TRANSITION_L1_COEF * torch.mean(t_l1_values * active_mask)
             ts.collect('T-L1 t={}'.format(t), t_l1_loss)
             loss += theta * t_l1_loss
             z = new_z
@@ -194,7 +198,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     predicted_activations = lo_z_set[t_a]
                     target_activations = lo_z_set[t].detach()
                     lo_loss_batch = latent_state_loss(target_activations, predicted_activations)
-                    lo_loss += lamb * torch.mean(lo_loss_batch * active_mask)
+                    lo_loss += td_lambda_coef * torch.mean(lo_loss_batch * active_mask)
 
             if not enable_td:
                 continue
@@ -223,14 +227,14 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     target_activations = td_z_set[t_b].detach()
                     td_loss_batch = latent_state_loss(target_activations, predicted_activations)
                     td_loss = torch.mean(td_loss_batch * active_mask)
-                    #ts.collect('TD {}:{}:{}'.format(t_a, t_b, t), td_lambda_loss)
-                    td_lambda_loss += lamb ** (t_b - t_a - 1) * td_loss
+                    td_coef = td_lambda_coef ** (t_b - t_a - 1) * td_lambda_coef ** (t_a - 1)
+                    td_lambda_loss += td_coef * td_loss
                     # TD including reward
                     predicted_r = reward_predictor(predicted_activations)
                     target_r = reward_predictor(target_activations).detach()
                     r_diffs = torch.mean((predicted_r - target_r)**2, dim=1)
                     r_loss = torch.mean(r_diffs * active_mask)
-                    td_lambda_loss += lamb ** (t_b - t_a - 1) * r_loss
+                    td_lambda_loss += td_coef * r_loss
             # end TD time loop
         if enable_latent_overshooting:
             ts.collect('LO total', lo_loss)
