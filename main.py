@@ -39,7 +39,13 @@ parser.add_argument('--td-steps', type=int, default=3, help='Number of concurren
 parser.add_argument('--horizon-min', type=int, default=3, help='Min timestep horizon value (training only)')
 parser.add_argument('--horizon-max', type=int, default=10, help='Max timestep horizon value (training only)')
 parser.add_argument('--learning-rate', type=float, default=.001, help='Adam lr value (training only)')
+parser.add_argument('--finetune-reward', action='store_true', help='Train ONLY the reward estimation network (training only)')
+parser.add_argument('--reward-coef', type=float, default=.001, help='Reward loss magnitude (training only)')
+parser.add_argument('--activation-l1-coef', type=float, default=.01, help='Activation sparsity coefficient (training only)')
+parser.add_argument('--transition-l1-coef', type=float, default=.01, help='Transition sparsity coefficient (training only)')
 args = parser.parse_args()
+
+
 
 
 def main():
@@ -94,6 +100,10 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     learning_rate = args.learning_rate
     min_prediction_horizon = args.horizon_min
     max_prediction_horizon = args.horizon_max
+    finetune_reward = args.finetune_reward
+    REWARD_COEF = args.reward_coef
+    ACTIVATION_L1_COEF = args.activation_l1_coef
+    TRANSITION_L1_COEF = args.transition_l1_coef
 
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=learning_rate)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
@@ -136,10 +146,6 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
         # Keep track of "done" states to stop a training trajectory at the final time step
         active_mask = torch.ones(batch_size).cuda()
-
-        REWARD_COEF = .001
-        ACTIVATION_L1_COEF = .05
-        TRANSITION_L1_COEF = .05
 
         loss = 0
         td_lambda_loss = 0
@@ -244,10 +250,11 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             loss += theta * td_lambda_loss
         loss.backward()
 
-        opt_enc.step()
-        opt_dec.step()
-        opt_trans.step()
         opt_pred.step()
+        if not args.finetune_reward:
+            opt_enc.step()
+            opt_dec.step()
+            opt_trans.step()
         ts.print_every(10)
     print(ts)
     print('Finished')
