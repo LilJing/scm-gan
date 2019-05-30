@@ -808,7 +808,7 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         'grid': True,
     }
     plt = pd.Series(mse_losses).plot(**plot_params)
-    plt.set_ylim(ymin=0)
+    plt.set_ylim(bottom=0)
     plt.set_ylabel('Pixel MSE')
     plt.set_xlabel('Prediction horizon (timesteps)')
 
