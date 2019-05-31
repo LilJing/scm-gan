@@ -39,7 +39,7 @@ class Env():
         return output_state, reward, done, info
 
 
-def get_trajectories(batch_size=32, timesteps=10, policy='random', random_start=False):
+def get_trajectories(batch_size=32, timesteps=10, policy='random', random_start=False, training=False):
     envs = MultiEnvironment([Env() for _ in range(batch_size)])
     t_states, t_rewards, t_dones, t_actions = [], [], [], []
     # Initial actions/stats
