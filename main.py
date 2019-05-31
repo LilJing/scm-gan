@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 import imutil
-from logutil import TimeSeries
+from logutil import TimeSeries, sparkline
 import pandas as pd
 
 import models
@@ -781,7 +781,6 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         diffs = active_mask * ((expected - predicted)**2).mean(dim=-1).mean(dim=-1).mean(dim=-1)
         rec_loss = torch.mean(diffs) * batch_size / torch.sum(active_mask)
         rec_std = torch.std(diffs) * batch_size / torch.sum(active_mask)
-        print('MSE t={} {:.04f}\n'.format(t, rec_loss))
         mse_losses.append(float(rec_loss))
         mse_stddevs.append(float(rec_std))
 
@@ -793,6 +792,9 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
     if len(mse_losses) == 0:
         print('Degenerate trajectory, skipping MSE calculation')
         return
+    print('MSE over {} timesteps: min {:.3f} max {:.3f}'.format(
+        timesteps, min(mse_losses), max(mse_losses)))
+    print(sparkline(mse_losses, length=80))
     print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
