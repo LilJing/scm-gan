@@ -1,8 +1,4 @@
-Structural Causal Model GAN
-
-This repository contains code for the upcoming paper submission
-tentatively titled:
-*Causal Disentanglement for Model-Based Reinforcement Learning*
+*Structural Causal Model GAN*
 
 The `main.py` file contains PyTorch code to build and train an
 action-conditional video prediction model, for reinforcement learning
