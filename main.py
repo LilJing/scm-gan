@@ -261,22 +261,11 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
 
 def latent_state_loss(target, predicted):
-    # MSE
     return ((target - predicted)**2).mean(-1).mean(-1).mean(-1)
-    # BCE
-    #eps = .0001
-    #target = torch.clamp(target, eps, 1 - eps)
-    #rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
-    #return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
 
 def decoder_pixel_loss(target, predicted):
-    # MSE
-    #return ((target - torch.sigmoid(predicted_logits))**2).mean(-1).mean(-1).mean(-1)
-    #eps = .0001
-    #target = torch.clamp(target, eps, 1 - eps)
     rec_loss_batch = F.binary_cross_entropy(predicted, target, reduction='none')
-    #rec_loss_batch = 0.5 * rec_loss_batch + 0.5 * target
     return rec_loss_batch.mean(-1).mean(-1).mean(-1)
 
 
@@ -330,16 +319,6 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
             #print('Expected reward from taking action {} is {:.03f}'.format(a, r_a))
         max_r = max(rewards)
         max_a = int(np.argmax(rewards))
-        #print('Optimal action: {} with reward {:.02f}'.format(max_a, max_r))
-
-        '''
-        if t == 20:
-            generate_planning_visualization(z, transition, decoder, reward_predictor,
-                                            num_actions, vid=vid, rollout_width=1, rollout_depth=30,
-                                            actions_list = [1, 3, 1, 3, 1] + [3, 3, 3, 1, 3]*5,
-                                            caption_title="Neural Simulation")
-        '''
-
 
         # Take the best action, in real life
         new_state, new_reward, done, info = env.step(max_a)
