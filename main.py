@@ -144,6 +144,11 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         # Given t, t+1, t+2, encoder outputs the state at time t+1
         z = encoder(states[:, 0:3])
 
+        # But wait, here's the problem: We can't use the encoded initial state as
+        # an initial state of the dynamical system and expect the system to work
+        # The dynamical system needs to have something like the Echo State Property
+        # So the dynamical parts need to run long enough to reach a steady state
+
         # Keep track of "done" states to stop a training trajectory at the final time step
         active_mask = torch.ones(batch_size).cuda()
 

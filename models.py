@@ -41,14 +41,37 @@ class DifferentiableBernoulliSampler(Function):
 
 
 class Transition(nn.Module):
-    def __init__(self, latent_size, num_actions):
+    def __init__(self, latent_size, num_actions, width=16):
         super().__init__()
         # Input: State + Action
         # Output: State
         self.latent_size = latent_size
 
+        self.res_depth = 16
+        self.reservoir = torch.zeros(1, self.res_depth, width, width).normal_().cuda()
+
+        #### experiment: what does the reservoir look like?
+        self.reservoir_conv = nn.Conv2d(self.res_depth, self.res_depth, (3,3), padding=0, groups=self.res_depth).cuda()
+        self.reservoir_conv.weight.requires_grad = False
+        self.reservoir_conv.bias.requires_grad = False
+
+        """
+        import imutil
+        vid = imutil.Video('reservoir')
+        for i in range(300):
+            print('Running reservoir iteration {}'.format(i))
+            self.reservoir = torch.tanh(convo(F.pad(self.reservoir, (1,1,1,1), mode='circular')))
+            self.reservoir /= (self.reservoir**2).mean()
+            vid.write_frame(self.reservoir[0], img_padding=4)
+            if i == 100:
+                self.reservoir[:, :, 16:48, 16:32].normal_()
+            self.reservoir.detach()
+        vid.finish()
+        """
+        self.stir_reservoir()
+
         # Skip connections from output of 1 to input of 6, and output of 2 to input of 5
-        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 16, (4,4), stride=2, padding=1))
+        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions + self.res_depth, 16, (4,4), stride=2, padding=1))
         self.conv2 = SpectralNorm(nn.Conv2d(16, 32, (4,4), stride=2, padding=1))
         #self.conv3 = (nn.Conv2d(32, 64, (4,4), stride=2, padding=1))
         #self.conv4 = (nn.ConvTranspose2d(64, 32, (4,4), stride=2, padding=1))
@@ -56,8 +79,18 @@ class Transition(nn.Module):
         self.conv6 = nn.ConvTranspose2d(16 + 16, latent_size, (4,4), stride=2, padding=1)
         self.cuda()
 
-    def forward(self, s, a, eps=None):
+    def step_reservoir(self):
+        self.reservoir = torch.tanh(self.reservoir_conv(F.pad(self.reservoir, (1,1,1,1), mode='circular')))
+        self.reservoir /= (self.reservoir ** 2).mean()
+
+    def stir_reservoir(self):
+        for _ in range(100):
+            self.step_reservoir()
+
+    def forward(self, s, a):
         start_time = time.time()
+
+        self.step_reservoir()
 
         actions = a
         z_map = s
@@ -65,16 +98,13 @@ class Transition(nn.Module):
         batch_size_actions, num_actions = actions.shape
         assert batch_size == batch_size_actions
 
-        #if eps is None:
-        #    eps = random_eps(batch_size=batch_size)
-        #assert len(eps) == batch_size
-
         # Broadcast the actions across the convolutional map
         actions = actions.unsqueeze(-1).unsqueeze(-1)
         actions = actions.repeat(1, 1, height, width)
 
-        # Stack the latent values, the actions, and random chance
-        x = torch.cat([z_map, actions], dim=1)
+        # Stack the latent values, the actions, and a dynamic reservoir
+        augment = self.reservoir.repeat((batch_size, 1, 1, 1))
+        x = torch.cat([z_map, actions, augment], dim=1)
 
         # Convolve down, saving skip activations like U-net
         x = self.conv1(x)
