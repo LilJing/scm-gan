@@ -251,6 +251,11 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             loss += theta * td_lambda_loss
         loss.backward()
 
+        from torch.nn.utils.clip_grad import clip_grad_norm
+        clip_grad_norm(encoder.parameters(), 0.1)
+        clip_grad_norm(transition.parameters(), 0.1)
+        clip_grad_norm(decoder.parameters(), 0.1)
+
         opt_pred.step()
         if not args.finetune_reward:
             opt_enc.step()
