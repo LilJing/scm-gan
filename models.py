@@ -31,7 +31,7 @@ class DifferentiableBernoulliSampler(Function):
     @staticmethod
     def forward(ctx, x):
         # In the forward pass, discretize by sampling
-        #ctx.save_for_backward(x)
+        ctx.save_for_backward(x)
         return torch.bernoulli(x)
 
     @staticmethod
@@ -48,12 +48,12 @@ class Transition(nn.Module):
         self.latent_size = latent_size
 
         # Skip connections from output of 1 to input of 6, and output of 2 to input of 5
-        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 16, (4,4), stride=2, padding=1))
-        self.conv2 = SpectralNorm(nn.Conv2d(16, 32, (4,4), stride=2, padding=1))
-        #self.conv3 = (nn.Conv2d(32, 64, (4,4), stride=2, padding=1))
-        #self.conv4 = (nn.ConvTranspose2d(64, 32, (4,4), stride=2, padding=1))
-        self.conv5 = SpectralNorm(nn.ConvTranspose2d(32, 16, (4,4), stride=2, padding=1))
-        self.conv6 = nn.ConvTranspose2d(16 + 16, latent_size, (4,4), stride=2, padding=1)
+        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv2 = SpectralNorm(nn.Conv2d(128, 256, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv3 = SpectralNorm(nn.Conv2d(256, 256, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv4 = SpectralNorm(nn.Conv2d(256, 256, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv5 = SpectralNorm(nn.Conv2d(256 + 256, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv6 = nn.Conv2d(128 + 128, latent_size, (3,3), stride=1, padding=2, padding_mode='circular')
         self.cuda()
 
     def forward(self, s, a, eps=None):
@@ -84,16 +84,15 @@ class Transition(nn.Module):
         x = self.conv2(x)
         x = F.leaky_relu(x)
 
-        #skip2 = x.clone()
-
-        #x = self.conv3(x)
-        #x = F.leaky_relu(x)
+        skip2 = x.clone()
+        x = self.conv3(x)
+        x = F.leaky_relu(x)
 
         # Convolve back up, using saved skips
-        #x = self.conv4(x)
-        #x = F.leaky_relu(x)
+        x = self.conv4(x)
+        x = F.leaky_relu(x)
 
-        #x = torch.cat([x, skip2], dim=1)
+        x = torch.cat([x, skip2], dim=1)
         x = self.conv5(x)
         x = F.leaky_relu(x)
 
@@ -104,12 +103,11 @@ class Transition(nn.Module):
         # And now, to make it stochastic: sample from the resulting
         # factorized multivariate Bernoulli distribution
         if self.training:
-            #x = DifferentiableBernoulliSampler.apply(x)
+            x = DifferentiableBernoulliSampler.apply(x)
             pass
         else:
             # During test time, drop the sampling
-            #x = (x > 0.5).type(x.type())
-            #x = DifferentiableBernoulliSampler.apply(x)
+            x = (x > 0.5).type(x.type())
             pass
 
         #ts.collect('Transition', time.time() - start_time)
@@ -124,12 +122,12 @@ class Encoder(nn.Module):
         self.latent_size = latent_size
         self.color_channels = color_channels
         # Bx1x64x64
-        self.conv1 = SpectralNorm(nn.Conv2d(color_channels * ENCODER_INPUT_FRAMES, 64, (3,3), stride=1, padding=1))
-        #self.bn_conv1 = nn.BatchNorm2d(32)
+        self.conv1 = SpectralNorm(nn.Conv2d(color_channels * ENCODER_INPUT_FRAMES, 128, (3,3), stride=1, padding=1))
+        self.bn_conv1 = nn.BatchNorm2d(128)
         # Bx8x32x32
-        #self.conv2 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=1, padding=1))
-        #self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=2, padding=1))
-        self.conv4 = nn.Conv2d(64, latent_size, (4,4), stride=2, padding=1)
+        self.conv2 = SpectralNorm(nn.Conv2d(128, 128, (3,3), stride=1, padding=1))
+        self.conv3 = SpectralNorm(nn.Conv2d(128, 128, (3,3), stride=1, padding=1))
+        self.conv4 = nn.Conv2d(128, latent_size, (3,3), stride=1, padding=1)
 
         # Bxlatent_size
         self.cuda()
@@ -143,11 +141,11 @@ class Encoder(nn.Module):
         x = self.conv1(x)
         x = F.leaky_relu(x)
 
-        #x = self.conv2(x)
-        #x = F.leaky_relu(x)
+        x = self.conv2(x)
+        x = F.leaky_relu(x)
 
-        #x = self.conv3(x)
-        #x = F.leaky_relu(x)
+        x = self.conv3(x)
+        x = F.leaky_relu(x)
 
         x = self.conv4(x)
         x = torch.sigmoid(x)
@@ -256,11 +254,11 @@ class Decoder(nn.Module):
 
         # Bx1x64x64
         self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (3,3),
-                        stride=2, padding=1, groups=latent_size, bias=False)
+                        stride=1, padding=1, groups=latent_size, bias=False)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
         self.conv2 = nn.ConvTranspose2d(latent_size * 4,
-                                        latent_size*self.color_channels, (4,4),
+                                        latent_size*self.color_channels, (3,3),
                                         stride=1, padding=1,
                                         groups=latent_size, bias=False)
         #self.bg = nn.Parameter(torch.zeros((3, IMG_SIZE, IMG_SIZE)).cuda())
@@ -276,7 +274,7 @@ class Decoder(nn.Module):
 
         x = self.conv2(x)
         # Sum the separate items
-        x = x.view(batch_size, latent_size, self.color_channels, height*2, width*2)
+        x = x.view(batch_size, latent_size, self.color_channels, height, width)
 
         # Optional: Learn to subtract static background, separate from objects
         #x = x + self.bg

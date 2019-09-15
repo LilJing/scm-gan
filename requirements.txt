@@ -5,3 +5,4 @@ matplotlib
 imutil>=0.1.24
 git+https://github.com/lwneal/logutil
 gym[atari]
+pandas

@@ -6,9 +6,10 @@ from multi_env import MultiEnvironment
 from gym.spaces.discrete import Discrete
 
 CHANNELS = 1
-GAME_SIZE = 32
+GAME_SIZE = 64
 NUM_ACTIONS = 1
 NUM_REWARDS = 1
+PREHEAT_STEPS = 2
 
 
 # Conway's Game of Life
@@ -20,8 +21,10 @@ class Env():
         self.action_space = Discrete(1)
 
     def reset(self, p=0.5):
-        # Initialize with Bernoulli distribution
+        # One row and column of circular padding for toroidal topology
         self.state = np.random.random((GAME_SIZE, GAME_SIZE)) > p
+        for _ in range(PREHEAT_STEPS):
+            self.step(0)
 
     def step(self, a):
         # Ignore input actions; Life is a zero-player game

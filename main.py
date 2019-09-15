@@ -10,10 +10,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import pandas as pd
 
 import imutil
 from logutil import TimeSeries, sparkline
-import pandas as pd
 
 import models
 from datasource import allocate_datasource
@@ -45,6 +45,7 @@ parser.add_argument('--activation-l1-coef', type=float, default=.01, help='Activ
 parser.add_argument('--transition-l1-coef', type=float, default=.01, help='Transition sparsity coefficient (training only)')
 args = parser.parse_args()
 
+ITERS_PER_VIDEO = 2000
 
 
 
@@ -113,7 +114,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
 
     for train_iter in range(0, train_iters + 1):
-        if train_iter % 1000 == 0:
+        if train_iter % ITERS_PER_VIDEO == 0:
             print('Evaluating networks...')
             evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=train_iter)
             print('Saving networks to filesystem...')
