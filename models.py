@@ -49,10 +49,10 @@ class Transition(nn.Module):
 
         # Skip connections from output of 1 to input of 6, and output of 2 to input of 5
         self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
-        self.conv2 = SpectralNorm(nn.Conv2d(128, 256, (3,3), stride=1, padding=2, padding_mode='circular'))
-        self.conv3 = SpectralNorm(nn.Conv2d(256, 256, (3,3), stride=1, padding=2, padding_mode='circular'))
-        self.conv4 = SpectralNorm(nn.Conv2d(256, 256, (3,3), stride=1, padding=2, padding_mode='circular'))
-        self.conv5 = SpectralNorm(nn.Conv2d(256 + 256, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv2 = SpectralNorm(nn.Conv2d(128, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv3 = SpectralNorm(nn.Conv2d(128, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv4 = SpectralNorm(nn.Conv2d(128, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv5 = SpectralNorm(nn.Conv2d(128 + 128, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
         self.conv6 = nn.Conv2d(128 + 128, latent_size, (3,3), stride=1, padding=2, padding_mode='circular')
         self.cuda()
 
