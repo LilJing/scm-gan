@@ -254,13 +254,12 @@ class Decoder(nn.Module):
 
         # Bx1x64x64
         self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (3,3),
-                        stride=1, padding=1, groups=latent_size, bias=False)
+                        stride=1, padding=1)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
         self.conv2 = nn.ConvTranspose2d(latent_size * 4,
                                         latent_size*self.color_channels, (3,3),
-                                        stride=1, padding=1,
-                                        groups=latent_size, bias=False)
+                                        stride=1, padding=1)
         #self.bg = nn.Parameter(torch.zeros((3, IMG_SIZE, IMG_SIZE)).cuda())
         self.cuda()
 
