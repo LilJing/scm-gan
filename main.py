@@ -45,7 +45,7 @@ parser.add_argument('--activation-l1-coef', type=float, default=.01, help='Activ
 parser.add_argument('--transition-l1-coef', type=float, default=.01, help='Transition sparsity coefficient (training only)')
 args = parser.parse_args()
 
-ITERS_PER_VIDEO = 2000
+ITERS_PER_VIDEO = 1000
 
 
 
