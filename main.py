@@ -113,7 +113,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=learning_rate)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
 
-    for train_iter in range(0, train_iters + 1):
+    for train_iter in range(1, train_iters + 1):
         if train_iter % ITERS_PER_VIDEO == 0:
             print('Evaluating networks...')
             evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=train_iter)
@@ -214,12 +214,15 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             # State i|j is the predicted state at time i conditioned on observation j
             # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
             # Also, state 3|1 will be equal to state 3|2
-            td_z_set[t] = encoder(states[:, t-1:t+2])
+
+            # In place of Z, store an iterable of [z', z'', ...] to apply TD over all layers
+            td_z_set[t] = [encoder(states[:, t-1:t+2])]
 
             # For each previous t_left, step forward to t
             for t_left in range(1, t):
+                z_t_left = td_z_set[t_left][-1].detach()
                 a = torch.eye(num_actions)[actions[:, t - 1]].cuda()
-                td_z_set[t_left] = transition(td_z_set[t_left], a)
+                td_z_set[t_left] = transition(z_t_left, a, return_all=True)
 
             # At time t_r, consider each combination (t_a, t_b) where a < b <= r
             # At t_a, we thought t_r would be s_{r|a}
@@ -228,20 +231,21 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             for t_a in range(2, t - 1):
                 # Single-Step TD: 4:3, 3:2, 2:1
                 # Multi-Step TD: 4:3, 4:2, 4:1, 3:2, 3:1...
-                for t_b in range(t_a + 1, min(t_a + td_steps, t + 1)):
+                for t_b in range(t_a + 1, min(t_a + td_steps, t)):
+                    print('TD comparing step {} to step {}'.format(t_a, t_b))
                     # Learn a guess, from a guess
                     predicted_activations = td_z_set[t_a]
-                    target_activations = td_z_set[t_b].detach()
-                    td_loss_batch = latent_state_loss(target_activations, predicted_activations)
+                    target_activations = td_z_set[t_b]
+                    td_loss_batch = td_latent_state_loss(target_activations, predicted_activations)
                     td_loss = torch.mean(td_loss_batch * active_mask)
                     td_coef = td_lambda_coef ** (t_b - t_a - 1) * td_lambda_coef ** (t_a - 1)
                     td_lambda_loss += td_coef * td_loss
                     # TD including reward
-                    predicted_r = reward_predictor(predicted_activations)
-                    target_r = reward_predictor(target_activations).detach()
-                    r_diffs = torch.mean((predicted_r - target_r)**2, dim=1)
-                    r_loss = torch.mean(r_diffs * active_mask)
-                    td_lambda_loss += td_coef * r_loss
+                    #predicted_r = reward_predictor(predicted_activations)
+                    #target_r = reward_predictor(target_activations).detach()
+                    #r_diffs = torch.mean((predicted_r - target_r)**2, dim=1)
+                    #r_loss = torch.mean(r_diffs * active_mask)
+                    #td_lambda_loss += td_coef * r_loss
             # end TD time loop
         if enable_latent_overshooting:
             ts.collect('LO total', lo_loss)
@@ -264,6 +268,10 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         ts.print_every(10)
     print(ts)
     print('Finished')
+
+
+def td_latent_state_loss(target, predicted):
+    return sum(latent_state_loss(t, p) for (t, p) in zip(target, predicted))
 
 
 def latent_state_loss(target, predicted):

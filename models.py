@@ -56,7 +56,7 @@ class Transition(nn.Module):
         self.conv6 = nn.Conv2d(128 + 128, latent_size, (3,3), stride=1, padding=2, padding_mode='circular')
         self.cuda()
 
-    def forward(self, s, a, eps=None):
+    def forward(self, s, a, return_all=False):
         start_time = time.time()
 
         actions = a
@@ -64,10 +64,6 @@ class Transition(nn.Module):
         batch_size, z, height, width = z_map.shape
         batch_size_actions, num_actions = actions.shape
         assert batch_size == batch_size_actions
-
-        #if eps is None:
-        #    eps = random_eps(batch_size=batch_size)
-        #assert len(eps) == batch_size
 
         # Broadcast the actions across the convolutional map
         actions = actions.unsqueeze(-1).unsqueeze(-1)
@@ -83,18 +79,24 @@ class Transition(nn.Module):
 
         x = self.conv2(x)
         x = F.leaky_relu(x)
-
         skip2 = x.clone()
+
         x = self.conv3(x)
         x = F.leaky_relu(x)
+        if return_all:
+            out3 = x.clone()
 
         # Convolve back up, using saved skips
         x = self.conv4(x)
         x = F.leaky_relu(x)
+        if return_all:
+            out4 = x.clone()
 
         x = torch.cat([x, skip2], dim=1)
         x = self.conv5(x)
         x = F.leaky_relu(x)
+        if return_all:
+            out5 = x.clone()
 
         x = torch.cat([x, skip1], dim=1)
         x = self.conv6(x)
@@ -112,6 +114,8 @@ class Transition(nn.Module):
 
         #ts.collect('Transition', time.time() - start_time)
         #ts.print_every(10)
+        if return_all:
+            return (skip1, skip2, out3, out4, out5, x)
         return x
 
 
