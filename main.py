@@ -144,6 +144,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         # Encode the initial state (using the first 3 frames)
         # Given t, t+1, t+2, encoder outputs the state at time t+1
         z = encoder(states[:, 0:3])
+        z_orig = z.clone()
 
         # Keep track of "done" states to stop a training trajectory at the final time step
         active_mask = torch.ones(batch_size).cuda()
@@ -177,19 +178,21 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             loss += rec_loss
 
             # Apply activation L1 loss
-            l1_values = z.abs().mean(-1).mean(-1).mean(-1)
-            l1_loss = ACTIVATION_L1_COEF * torch.mean(l1_values * active_mask)
-            ts.collect('L1 t={}'.format(t), l1_loss)
-            loss += theta * l1_loss
+            #l1_values = z.abs().mean(-1).mean(-1).mean(-1)
+            #l1_loss = ACTIVATION_L1_COEF * torch.mean(l1_values * active_mask)
+            #ts.collect('L1 t={}'.format(t), l1_loss)
+            #loss += theta * l1_loss
 
             # Predict transition to the next state
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
+
             # Apply transition L1 loss
-            t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
-            t_l1_loss = TRANSITION_L1_COEF * torch.mean(t_l1_values * active_mask)
-            ts.collect('T-L1 t={}'.format(t), t_l1_loss)
-            loss += theta * t_l1_loss
+            #t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
+            #t_l1_loss = TRANSITION_L1_COEF * torch.mean(t_l1_values * active_mask)
+            #ts.collect('T-L1 t={}'.format(t), t_l1_loss)
+            #loss += theta * t_l1_loss
+
             z = new_z
 
             if enable_latent_overshooting:
@@ -210,49 +213,35 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             if not enable_td:
                 continue
 
-            # TD-Lambda Loss
-            # State i|j is the predicted state at time i conditioned on observation j
-            # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
-            # Also, state 3|1 will be equal to state 3|2
-
-            # In place of Z, store an iterable of [z', z'', ...] to apply TD over all layers
-            td_z_set[t] = [encoder(states[:, t-1:t+2])]
-
-            # For each previous t_left, step forward to t
-            for t_left in range(1, t):
-                z_t_left = td_z_set[t_left][-1].detach()
-                a = torch.eye(num_actions)[actions[:, t - 1]].cuda()
-                td_z_set[t_left] = transition(z_t_left, a, return_all=True)
-
-            # At time t_r, consider each combination (t_a, t_b) where a < b <= r
-            # At t_a, we thought t_r would be s_{r|a}
-            # But later at t_b, we updated our belief to s_{r|b}
-            # Update s_{r|a} to be closer to s_{r|b}, for every b up to and including s_{r|r}
-            for t_a in range(2, t - 1):
-                # Single-Step TD: 4:3, 3:2, 2:1
-                # Multi-Step TD: 4:3, 4:2, 4:1, 3:2, 3:1...
-                for t_b in range(t_a + 1, min(t_a + td_steps, t)):
-                    print('TD comparing step {} to step {}'.format(t_a, t_b))
-                    # Learn a guess, from a guess
-                    predicted_activations = td_z_set[t_a]
-                    target_activations = td_z_set[t_b]
-                    td_loss_batch = td_latent_state_loss(target_activations, predicted_activations)
-                    td_loss = torch.mean(td_loss_batch * active_mask)
-                    td_coef = td_lambda_coef ** (t_b - t_a - 1) * td_lambda_coef ** (t_a - 1)
-                    td_lambda_loss += td_coef * td_loss
-                    # TD including reward
-                    #predicted_r = reward_predictor(predicted_activations)
-                    #target_r = reward_predictor(target_activations).detach()
-                    #r_diffs = torch.mean((predicted_r - target_r)**2, dim=1)
-                    #r_loss = torch.mean(r_diffs * active_mask)
-                    #td_lambda_loss += td_coef * r_loss
-            # end TD time loop
         if enable_latent_overshooting:
             ts.collect('LO total', lo_loss)
             loss += theta * lo_loss
-        if enable_td:
-            ts.collect('TD total', td_lambda_loss)
-            loss += theta * td_lambda_loss
+
+        # COUNTERFACTUAL LOSS
+        # We wish to encode the assumption into our model that each action button is connected to only one or a few latent factors
+        # Previously, this was done with an L1 penalty on all latent transitions at every t -> t+1
+        # But that's heavy-handed and not truly what we want.
+        # If our every action has a consistent, specific, localized effect on the world, then let's think about counterfactuals
+        # If I take action 1, then I expect it to create universe A
+        # Counterfactually if I take action 2, then I expect it to create universe B
+        # What do I expect is the relationship between universes A and B?
+        # If my own actions have a localized and specific effect on the world, then ||A - B||_1 should be small
+        enable_counterfactual_loss = False
+        if enable_counterfactual_loss and train_iter % 5 == 0:
+            # Counterfactual scenario A: our memory of what really happened
+            z_cf_a = z.clone()
+            # Counterfactual scenario B: our imagination of what might have happened
+            z_cf_b = z_orig
+            cf_actions = actions.copy()
+            np.random.shuffle(cf_actions)
+            for t in range(1, prediction_horizon - 1):
+                onehot_a = torch.eye(num_actions)[cf_actions[:,t]].cuda()
+                z_cf_b = transition(z_cf_b, onehot_a)
+            cf_loss = torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1).mean(-1)
+            cf_loss = .1 * torch.mean(cf_loss * active_mask)
+            loss += cf_loss
+            ts.collect('CF Loss', cf_loss)
+
         loss.backward()
 
         from torch.nn.utils.clip_grad import clip_grad_norm
