@@ -45,7 +45,7 @@ parser.add_argument('--activation-l1-coef', type=float, default=.01, help='Activ
 parser.add_argument('--transition-l1-coef', type=float, default=.01, help='Transition sparsity coefficient (training only)')
 args = parser.parse_args()
 
-ITERS_PER_VIDEO = 1000
+ITERS_PER_VIDEO = 2000
 
 
 
@@ -212,7 +212,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             ts.collect('LO total', lo_loss)
             loss += theta * lo_loss
 
-        # COUNTERFACTUAL LOSS
+        # COUNTERFACTUAL SPARSITY REGULARIZATION
         # We wish to encode the assumption into our model that each action button is connected to only one or a few latent factors
         # Previously, this was done with an L1 penalty on all latent transitions at every t -> t+1
         # But that's heavy-handed and not truly what we want.
@@ -227,6 +227,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             z_cf_a = z.clone()
             # Counterfactual scenario B: our imagination of what might have happened
             z_cf_b = z_orig
+            # Instead of the regular actions, apply an alternate policy
             cf_actions = actions.copy()
             np.random.shuffle(cf_actions)
             for t in range(1, prediction_horizon - 1):
@@ -235,7 +236,36 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             cf_loss = torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1).mean(-1)
             cf_loss = .1 * torch.mean(cf_loss * active_mask)
             loss += cf_loss
-            ts.collect('CF Loss', cf_loss)
+            ts.collect('CF Sparsity Loss', cf_loss)
+
+        # COUNTERFACTUAL DISENTANGLEMENT REGULARIZATION
+        # Suppose that our representation is ideally, perfectly disentangled
+        # Then the PGM has no edges, the causal graph is just nodes with no relationships
+        # In this case, it should be true that intervening on any one factor has no effect on the others
+        # One fun way of intervening is swapping factors, a la FactorVAE
+        # If we intervene on some dimensions, the other dimensions should be unaffected
+        enable_cf_shuffle_loss = False
+        if enable_cf_shuffle_loss and train_iter % 5 == 0:
+            # Counterfactual scenario A: our memory of what really happened
+            z_cf_a = z.clone()
+            # Counterfactual scenario B: a bizzaro world where two dimensions are swapped
+            z_cf_b = z_orig
+            unswapped_factor_map = torch.ones((batch_size, latent_dim)).cuda()
+            for i in range(batch_size):
+                idx_a = np.random.randint(latent_dim)
+                idx_b = np.random.randint(latent_dim)
+                unswapped_factor_map[i, idx_a] = 0
+                unswapped_factor_map[i, idx_b] = 0
+                z_cf_b[i, idx_a], z_cf_b[i, idx_b] = z_cf_b[i, idx_b], z_cf_b[i, idx_a]
+            # But we take the same actions
+            for t in range(1, prediction_horizon - 1):
+                onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
+                z_cf_b = transition(z_cf_b, onehot_a)
+            # Every UNSWAPPED dimension should be as similar as possible to its bizzaro-world equivalent
+            cf_loss = torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1) * unswapped_factor_map
+            cf_loss = .1 * torch.mean(cf_loss.mean(-1) * active_mask)
+            loss += cf_loss
+            ts.collect('CF Disentanglement Loss', cf_loss)
 
         loss.backward()
 
