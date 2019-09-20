@@ -38,7 +38,7 @@ parser.add_argument('--td-lambda', type=float, default=0.9, help='Scalar lambda 
 parser.add_argument('--td-steps', type=int, default=3, help='Number of concurrent TD forward predictions (training only)')
 parser.add_argument('--horizon-min', type=int, default=3, help='Min timestep horizon value (training only)')
 parser.add_argument('--horizon-max', type=int, default=10, help='Max timestep horizon value (training only)')
-parser.add_argument('--learning-rate', type=float, default=.001, help='Adam lr value (training only)')
+parser.add_argument('--learning-rate', type=float, default=.0001, help='Adam lr value (training only)')
 parser.add_argument('--finetune-reward', action='store_true', help='Train ONLY the reward estimation network (training only)')
 parser.add_argument('--reward-coef', type=float, default=.001, help='Reward loss magnitude (training only)')
 parser.add_argument('--activation-l1-coef', type=float, default=.01, help='Activation sparsity coefficient (training only)')
@@ -244,10 +244,10 @@ def train(latent_dim, datasource, num_actions, num_rewards,
 
         loss.backward()
 
-        from torch.nn.utils.clip_grad import clip_grad_norm
-        clip_grad_norm(encoder.parameters(), 0.1)
-        clip_grad_norm(transition.parameters(), 0.1)
-        clip_grad_norm(decoder.parameters(), 0.1)
+        from torch.nn.utils.clip_grad import clip_grad_value_
+        clip_grad_value_(encoder.parameters(), 0.1)
+        clip_grad_value_(transition.parameters(), 0.1)
+        clip_grad_value_(decoder.parameters(), 0.1)
 
         opt_pred.step()
         if not args.finetune_reward:
