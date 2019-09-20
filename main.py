@@ -150,10 +150,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         active_mask = torch.ones(batch_size).cuda()
 
         loss = 0
-        td_lambda_loss = 0
         lo_loss = 0
         lo_z_set = {}
-        td_z_set = {}
         # Given the state encoded at t=2, predict state at t=3, t=4, ...
         for t in range(1, prediction_horizon - 1):
             active_mask = active_mask * (1 - dones[:, t])
@@ -209,9 +207,6 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     target_activations = lo_z_set[t].detach()
                     lo_loss_batch = latent_state_loss(target_activations, predicted_activations)
                     lo_loss += td_lambda_coef * torch.mean(lo_loss_batch * active_mask)
-
-            if not enable_td:
-                continue
 
         if enable_latent_overshooting:
             ts.collect('LO total', lo_loss)
@@ -548,8 +543,8 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
     print('Generating videos for offsets {}'.format(offsets))
     for offset in offsets:
         vid_rgb = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
-        vid_aleatoric = imutil.Video('anomaly_detection_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
-        #vid_reward = imutil.Video('reward_prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
+        #vid_aleatoric = imutil.Video('anomaly_detection_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
+        vid_reward = imutil.Video('reward_prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
         for t in range(3, timesteps - offset):
             # Encode frames t-2, t-1, t to produce state at t-1
             # Then step forward once to produce state at t
@@ -574,21 +569,21 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
             # Difference between actual and predicted outcomes is "surprise"
             surprise_map = torch.clamp((actual_features - predicted_features) ** 2, 0, 1)
 
-            caption = "t={} surprise (aleatoric): {:.03f}".format(t, surprise_map.sum())
-            pixels = composite_aleatoric_surprise_image(actual_rgb, surprise_map, z)
-            vid_aleatoric.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
+            #caption = "t={} surprise (aleatoric): {:.03f}".format(t, surprise_map.sum())
+            #pixels = composite_aleatoric_surprise_image(actual_rgb, surprise_map, z)
+            #vid_aleatoric.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
 
             caption = "Left: True t={} Right: Predicted t+{}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
             pixels = composite_feature_rgb_image(actual_features, actual_rgb, predicted_features, predicted_rgb)
             vid_rgb.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
 
-            #caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
-            #reward_pixels = composite_rgb_reward_factor_image(predicted_rgb, reward_map, z, num_rewards=num_rewards)
-            #vid_reward.write_frame(reward_pixels, normalize=False, caption=caption)
+            caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
+            reward_pixels = composite_rgb_reward_factor_image(predicted_rgb, reward_map, z, num_rewards=num_rewards)
+            vid_reward.write_frame(reward_pixels, normalize=False, caption=caption)
 
         vid_rgb.finish()
-        vid_aleatoric.finish()
-        #vid_reward.finish()
+        #vid_aleatoric.finish()
+        vid_reward.finish()
     print('Finished generating forward-prediction videos')
 
 
