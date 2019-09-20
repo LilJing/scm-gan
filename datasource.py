@@ -2,6 +2,7 @@ from envs import sc2_star_intruders
 from envs import betterpong
 from envs import gridworld
 from envs import gameoflife
+from envs import minipacman
 
 
 def allocate_datasource(datasource_name):
@@ -19,6 +20,8 @@ def allocate_datasource(datasource_name):
         return GridWorld()
     elif datasource_name == 'gameoflife':
         return GameOfLife()
+    elif datasource_name == 'minipacman':
+        return MiniPacMan()
     msg = 'Failed to find datasource with name {}'.format(datasource_name)
     raise ValueError(msg)
 
@@ -95,4 +98,19 @@ class GameOfLife(Datasource):
 
     def get_trajectories(self, *args, **kwargs):
         states, rewards, dones, actions = gameoflife.get_trajectories(*args, **kwargs)
+        return states, rewards, dones, actions
+
+
+class MiniPacMan(Datasource):
+    def __init__(self):
+        self.binary_input_channels = minipacman.NUM_ACTIONS
+        self.scalar_output_channels = minipacman.NUM_REWARDS
+        self.conv_input_channels = 3
+        self.conv_output_channels = 3
+
+    def make_env(self):
+        return minipacman.MiniPacManEnv()
+
+    def get_trajectories(self, *args, **kwargs):
+        states, rewards, dones, actions = minipacman.get_trajectories(*args, **kwargs)
         return states, rewards, dones, actions
