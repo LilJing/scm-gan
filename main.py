@@ -234,7 +234,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 onehot_a = torch.eye(num_actions)[cf_actions[:,t]].cuda()
                 z_cf_b = transition(z_cf_b, onehot_a)
             cf_loss = torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1).mean(-1)
-            cf_loss = .1 * torch.mean(cf_loss * active_mask)
+            cf_loss = .01 * torch.mean(cf_loss * active_mask)
             loss += cf_loss
             ts.collect('CF Sparsity Loss', cf_loss)
 
@@ -263,7 +263,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 z_cf_b = transition(z_cf_b, onehot_a)
             # Every UNSWAPPED dimension should be as similar as possible to its bizzaro-world equivalent
             cf_loss = torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1) * unswapped_factor_map
-            cf_loss = .1 * torch.mean(cf_loss.mean(-1) * active_mask)
+            cf_loss = .01 * torch.mean(cf_loss.mean(-1) * active_mask)
             loss += cf_loss
             ts.collect('CF Disentanglement Loss', cf_loss)
 
