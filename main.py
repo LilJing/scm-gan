@@ -30,6 +30,7 @@ parser.add_argument('--evaluations', type=int, default=1, help='Integer number o
 parser.add_argument('--title', type=str, help='Name of experiment in output figures')
 parser.add_argument('--batch-size', type=int, default=32, help='Training batch size')
 parser.add_argument('--train-iters', type=int, default=10000, help='Number of iterations of training')
+parser.add_argument('--start-iter', type=int, default=1, help='Start iteration when resuming from checkpoint')
 
 parser.add_argument('--truncate-bptt', action='store_true', help='Train only with timestep-local information (training only)')
 parser.add_argument('--latent-overshooting', action='store_true', help='Train with Latent Overshooting from Hafner et al. (training only)')
@@ -105,6 +106,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     REWARD_COEF = args.reward_coef
     ACTIVATION_L1_COEF = args.activation_l1_coef
     TRANSITION_L1_COEF = args.transition_l1_coef
+    start_iter = args.start_iter
 
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=learning_rate)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
@@ -113,7 +115,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=learning_rate)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
 
-    for train_iter in range(1, train_iters + 1):
+    for train_iter in range(start_iter, train_iters + 1):
         if train_iter % ITERS_PER_VIDEO == 0:
             print('Evaluating networks...')
             evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=train_iter)
