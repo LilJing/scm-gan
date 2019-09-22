@@ -356,7 +356,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     # Estimate initial state (given t=0,1,2 estimate state at t=2)
     states = torch.Tensor(state_list).cuda().unsqueeze(0)
     z = encoder(states)
-    z = transition(z, onehot(no_op))
+    z = transition(z, onehot(no_op, num_actions))
 
     cumulative_reward = 0
     filename = 'SimpleRolloutAgent-{}.mp4'.format(int(time.time()))
@@ -369,7 +369,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         # In simulation, compute all possible futures to select the best action
         rewards = []
         for a in range(num_actions):
-            z_a = transition(z, onehot(a))
+            z_a = transition(z, onehot(a, num_actions))
             r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions, a)
             rewards.append(r_a)
             #print('Expected reward from taking action {} is {:.03f}'.format(a, r_a))
@@ -395,7 +395,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
 
         state_list = state_list[1:] + [ftr_state]
         z = encoder(torch.Tensor(state_list).cuda().unsqueeze(0))
-        z = transition(z, onehot(max_a))
+        z = transition(z, onehot(max_a, num_actions))
         t += 1
         if t > 300:
             print('Ending evaluation due to time limit')
@@ -429,7 +429,7 @@ def generate_planning_visualization(z, transition, decoder, reward_predictor,
     frames = []
     z = z.repeat(rollout_width, 1, 1, 1)
     for t in range(rollout_depth):
-        z = transition(z, onehot(actions[:, t]))
+        z = transition(z, onehot(actions[:, t], num_actions))
         features = decoder(z)
         features = torch.sigmoid(features)
         rewards = reward_predictor(z)
@@ -479,7 +479,7 @@ def compute_rollout_reward(z, transition, reward_predictor, num_actions,
     # Starting from z, move forward in time and count the rewards
     for t in range(rollout_depth):
         z = z.detach()
-        z = transition(z, onehot(actions[:, t]))
+        z = transition(z, onehot(actions[:, t], num_actions))
         cumulative_reward += reward_predictor(z)
 
     # Heuristic, select level of "caution" about negative reward
