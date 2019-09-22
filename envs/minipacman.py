@@ -27,7 +27,7 @@ sim_thread = None
 
 
 from gym_minipacman.envs.minipacman_env import MiniPacman, ALE
-class DeathBadMiniPacman(MiniPacman):
+class MiniPacManEnv(MiniPacman):
     def __init__(self):
         # {0:'NOOP',1:'RIGHT',2:'UP',3:'LEFT',4:'DOWN'}
         self.ale = ALE(1)
@@ -44,7 +44,7 @@ class DeathBadMiniPacman(MiniPacman):
 
 
 def make_env():
-    return DeathBadMiniPacman()
+    return MiniPacManEnv()
 
 
 def init():
