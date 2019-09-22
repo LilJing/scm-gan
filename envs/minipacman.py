@@ -43,7 +43,7 @@ class MiniPacManEnv(MiniPacman):
         super().__init__()
 
 
-def make_env():
+def make_env(*args, **kwargs):
     return MiniPacManEnv()
 
 

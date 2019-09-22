@@ -273,6 +273,28 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             loss += cf_loss
             ts.collect('CF Disentanglement Loss', cf_loss)
 
+        # COUNTERFACTUAL ILLUSORY CONTROL BIAS
+        # In difficult POMDPs, deep neural networks can suffer from learned helplessness
+        # They learn, rationally, that their actions have no causal influence on the reward
+        # This is undesirable: the learned model should assume that outcomes are controllable
+        enable_control_bias_loss = False
+        if enable_control_bias_loss and train_iter % 5 == 0:
+            # Counterfactual scenario A: our memory of what really happened
+            z_cf_a = z.clone()
+            # Counterfactual scenario B: our imagination of what might have happened
+            z_cf_b = z_orig
+            # Instead of the regular actions, apply an alternate policy
+            cf_actions = actions.copy()
+            np.random.shuffle(cf_actions)
+            for t in range(1, prediction_horizon - 1):
+                onehot_a = torch.eye(num_actions)[cf_actions[:,t]].cuda()
+                z_cf_b = transition(z_cf_b, onehot_a)
+            eps = .001  # for numerical stability
+            cf_loss = -torch.log(torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1).mean(-1) + eps)
+            cf_loss = .01 * torch.mean(cf_loss * active_mask)
+            loss += cf_loss
+            ts.collect('CF Control Bias Loss', cf_loss)
+
         loss.backward()
 
         from torch.nn.utils.clip_grad import clip_grad_value_

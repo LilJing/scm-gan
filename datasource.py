@@ -108,7 +108,7 @@ class MiniPacMan(Datasource):
         self.conv_input_channels = 3
         self.conv_output_channels = 3
 
-    def make_env(self):
+    def make_env(self, *args, **kwargs):
         return minipacman.MiniPacManEnv()
 
     def get_trajectories(self, *args, **kwargs):
