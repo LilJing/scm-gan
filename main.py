@@ -48,6 +48,8 @@ args = parser.parse_args()
 
 ITERS_PER_VIDEO = 2000
 
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.enabled = True
 
 
 def main():
@@ -79,11 +81,13 @@ def main():
         reward_predictor.load_state_dict(torch.load(os.path.join(args.load_from, 'model-reward_predictor.pth')))
 
     if args.evaluate:
-        evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, use_training_set=True)
+        print('Finished {} playthroughs'.format(args.evaluations))
         for _ in range(args.evaluations):
-            play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
-                 reward_predictor, discriminator, transition)
-        print('Finished {} evaluations'.format(args.evaluations))
+            with torch.no_grad():
+                play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
+                     reward_predictor, discriminator, transition)
+        print('Finished {} playthroughs'.format(args.evaluations))
+        evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, use_training_set=True)
     else:
         train(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
               reward_predictor, discriminator, transition)
@@ -334,7 +338,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
 
     cumulative_reward = 0
     filename = 'SimpleRolloutAgent-{}.mp4'.format(int(time.time()))
-    vid = imutil.Video(filename, framerate=12)
+    vid = imutil.Video(filename, framerate=10)
     t = 2
     cumulative_negative_reward = 0
     cumulative_positive_reward = 0
