@@ -111,6 +111,10 @@ class MiniPacMan(Datasource):
     def make_env(self, *args, **kwargs):
         return minipacman.MiniPacManEnv()
 
+    def convert_frame(self, state):
+        state = state.transpose((2,0,1))
+        return state, state
+
     def get_trajectories(self, *args, **kwargs):
         states, rewards, dones, actions = minipacman.get_trajectories(*args, **kwargs)
         return states, rewards, dones, actions

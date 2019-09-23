@@ -370,7 +370,10 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         rewards = []
         for a in range(num_actions):
             z_a = transition(z, onehot(a, num_actions))
-            r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions, a)
+            # Look ahead three steps, using 3-step lookahead
+            rollout_width = num_actions ** 3
+            r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions, a,
+                                         rollout_width=rollout_width, rollout_depth=20, rollout_policy='random')
             rewards.append(r_a)
             #print('Expected reward from taking action {} is {:.03f}'.format(a, r_a))
         max_r = max(rewards)
@@ -379,8 +382,12 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         # Take the best action, in real life
         new_state, new_reward, done, info = env.step(max_a)
 
-        positive_reward = sum(v for v in info.values() if v > 0)
-        negative_reward = sum(v for v in info.values() if v < 0)
+        if len(info) > 1:
+            positive_reward = sum(v for v in info.values() if v > 0)
+            negative_reward = sum(v for v in info.values() if v < 0)
+        else:
+            positive_reward = max(0, new_reward)
+            negative_reward = min(0, new_reward)
 
         cumulative_positive_reward += positive_reward
         cumulative_negative_reward -= negative_reward
@@ -459,18 +466,21 @@ def onehot(a_idx, num_actions=4):
 
 def compute_rollout_reward(z, transition, reward_predictor, num_actions,
                            selected_action, rollout_width=64, rollout_depth=16,
-                           negative_positive_tradeoff=10.0):
+                           rollout_policy='noop', negative_positive_tradeoff=10.0):
     # Initialize a beam
     z = z.repeat(rollout_width, 1, 1, 1)
 
-    # Use 3-step lookahead followed by a no-op rollout policy
+    # Use 3-step lookahead followed by a rollout policy
     noop_idx = 3
     actions = []
     for i in range(num_actions):
         for j in range(num_actions):
             for k in range(num_actions):
                 # Test the 3-action sequence [i,j,k] and then roll out
-                actions.append([i, j, k] + [noop_idx] * (rollout_depth - 3))
+                if rollout_policy == 'noop':
+                    actions.append([i, j, k] + [noop_idx] * (rollout_depth - 3))
+                elif rollout_policy == 'random':
+                    acitons.append([i, j, k] + [np.random.randint(num_actions) for _ in range(rollout_depth - 3)])
     actions = torch.LongTensor(np.array(actions)).cuda()
     assert len(actions) == rollout_width
 
