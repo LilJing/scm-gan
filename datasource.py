@@ -63,7 +63,7 @@ class Pong(Datasource):
         self.conv_input_channels = 3
         self.conv_output_channels = 3
 
-    def make_env(self):
+    def make_env(self, *args, **kwargs):
         return betterpong.BetterPongEnv()
 
     def get_trajectories(self, *args, **kwargs):
@@ -78,7 +78,7 @@ class GridWorld(Datasource):
         self.conv_input_channels = 3
         self.conv_output_channels = 3
 
-    def make_env(self):
+    def make_env(self, *args, **kwargs):
         return gridworld.Env()
 
     def get_trajectories(self, *args, **kwargs):
@@ -93,7 +93,7 @@ class GameOfLife(Datasource):
         self.conv_input_channels = 1
         self.conv_output_channels = 1
 
-    def make_env(self):
+    def make_env(self, *args, **kwargs):
         return gameoflife.Env()
 
     def get_trajectories(self, *args, **kwargs):
