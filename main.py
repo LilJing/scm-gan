@@ -371,9 +371,8 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         for a in range(num_actions):
             z_a = transition(z, onehot(a, num_actions))
             # Look ahead three steps, using 3-step lookahead
-            rollout_width = num_actions ** 3
             r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions, a,
-                                         rollout_width=rollout_width, rollout_depth=20, rollout_policy='random')
+                                         rollout_depth=20, rollout_policy='noop')
             rewards.append(r_a)
             #print('Expected reward from taking action {} is {:.03f}'.format(a, r_a))
         max_r = max(rewards)
@@ -426,8 +425,10 @@ def generate_trajectory_video(datasource):
 
 
 def generate_planning_visualization(z, transition, decoder, reward_predictor,
-                                    num_actions, vid=None, rollout_width=64, rollout_depth=20,
+                                    num_actions, vid=None, lookahead=3, rollout_depth=20,
                                     caption_title="Neural Simulation", actions_list=None):
+    assert lookahead == 3  # TODO: support different lookahead values
+    rollout_width = num_actions ** lookahead
     if actions_list:
         actions = np.array([actions_list] * rollout_width)
     else:
@@ -465,8 +466,10 @@ def onehot(a_idx, num_actions=4):
 
 
 def compute_rollout_reward(z, transition, reward_predictor, num_actions,
-                           selected_action, rollout_width=64, rollout_depth=16,
+                           selected_action, lookahead=3, rollout_depth=16,
                            rollout_policy='noop', negative_positive_tradeoff=10.0):
+    assert lookahead == 3  # TODO: support different lookahead values
+    rollout_width = num_actions ** lookahead
     # Initialize a beam
     z = z.repeat(rollout_width, 1, 1, 1)
 
