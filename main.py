@@ -372,7 +372,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
             z_a = transition(z, onehot(a, num_actions))
             # Look ahead three steps, using 3-step lookahead
             r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions, a,
-                                         rollout_depth=20, rollout_policy='noop')
+                                         rollout_depth=12, rollout_policy='noop')
             rewards.append(r_a)
             #print('Expected reward from taking action {} is {:.03f}'.format(a, r_a))
         max_r = max(rewards)
@@ -466,24 +466,22 @@ def onehot(a_idx, num_actions=4):
 
 
 def compute_rollout_reward(z, transition, reward_predictor, num_actions,
-                           selected_action, lookahead=3, rollout_depth=16,
+                           selected_action, lookahead=2, rollout_depth=12,
                            rollout_policy='noop', negative_positive_tradeoff=10.0):
-    assert lookahead == 3  # TODO: support different lookahead values
     rollout_width = num_actions ** lookahead
     # Initialize a beam
     z = z.repeat(rollout_width, 1, 1, 1)
 
     # Use 3-step lookahead followed by a rollout policy
-    noop_idx = 3
     actions = []
     for i in range(num_actions):
         for j in range(num_actions):
-            for k in range(num_actions):
-                # Test the 3-action sequence [i,j,k] and then roll out
-                if rollout_policy == 'noop':
-                    actions.append([i, j, k] + [noop_idx] * (rollout_depth - 3))
-                elif rollout_policy == 'random':
-                    acitons.append([i, j, k] + [np.random.randint(num_actions) for _ in range(rollout_depth - 3)])
+            # Test the 2-action sequence [i,j] and then roll out
+            if rollout_policy == 'noop':
+                noop_idx = 0
+                actions.append([i, j] + [noop_idx] * (rollout_depth - lookahead))
+            elif rollout_policy == 'random':
+                actions.append([i, j] + [np.random.randint(num_actions) for _ in range(rollout_depth - lookahead)])
     actions = torch.LongTensor(np.array(actions)).cuda()
     assert len(actions) == rollout_width
 
