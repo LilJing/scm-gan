@@ -1,20 +1,28 @@
-*Structural Causal Model GAN*
+*Counterfactual Regularization for Model-Based Reinforcement Learning*
 
 The `main.py` file contains PyTorch code to build and train an
 action-conditional video prediction model, for reinforcement learning
 environments.
 This model can predict future frames (given any plan of actions).
 
-The available environments are listed as modules in the `envs`
-directory.
-
-To run the system with the example Pong environment, run:
+To run the system with the MiniPacMan environment, run:
 
 ```
-python main.py --load-from . --env pong
+python main.py --env minipacman
 ```
 
-Note: The constants defined in `models.py` and the hyperparameters
-in `main.py` are dependent on the chosen environment.
-Some environments will require changes to parameters or model
-architecture.
+To evaluate after training, run:
+
+```
+python main.py --env minipacman --load-from . --evaluate
+```
+
+Built for Ubuntu 18.04. Requires Python 3.6+ and ffmpeg with libx264.
+See requirements.txt for required modules.
+
+For StarCraft2 environments, use the included custom branch of sc2env.
+The `install_starcraft2` script will install a development version of
+StarCraftII version Base60321. Works with Ubuntu 18.04.
+
+Note: For fast GPU-based rendering on NVidia cards, ensure that
+a version of libEGL.so is available in `ldconfig`.

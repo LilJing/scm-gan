@@ -44,9 +44,17 @@ parser.add_argument('--finetune-reward', action='store_true', help='Train ONLY t
 parser.add_argument('--reward-coef', type=float, default=.001, help='Reward loss magnitude (training only)')
 parser.add_argument('--activation-l1-coef', type=float, default=.01, help='Activation sparsity coefficient (training only)')
 parser.add_argument('--transition-l1-coef', type=float, default=.01, help='Transition sparsity coefficient (training only)')
+
+parser.add_argument('--enable-action-control-loss', action='store_true', help='Enable the CF Action Control regulariztion')
+parser.add_argument('--enable-disentanglement-loss', action='store_true', help='Enable the CF Disentanglement regularization')
 args = parser.parse_args()
 
 ITERS_PER_VIDEO = 2000
+CF_REGULARIZATION_RATE = 5
+CF_REGULARIZATION_LAMBDA = .01
+
+enable_cf_shuffle_loss = args.enable_disentanglement_loss
+enable_control_bias_loss = args.enable_action_control_loss
 
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.enabled = True
@@ -218,40 +226,13 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             ts.collect('LO total', lo_loss)
             loss += theta * lo_loss
 
-        # COUNTERFACTUAL SPARSITY REGULARIZATION
-        # We wish to encode the assumption into our model that each action button is connected to only one or a few latent factors
-        # Previously, this was done with an L1 penalty on all latent transitions at every t -> t+1
-        # But that's heavy-handed and not truly what we want.
-        # If our every action has a consistent, specific, localized effect on the world, then let's think about counterfactuals
-        # If I take action 1, then I expect it to create universe A
-        # Counterfactually if I take action 2, then I expect it to create universe B
-        # What do I expect is the relationship between universes A and B?
-        # If my own actions have a localized and specific effect on the world, then ||A - B||_1 should be small
-        enable_counterfactual_loss = False
-        if enable_counterfactual_loss and train_iter % 5 == 0:
-            # Counterfactual scenario A: our memory of what really happened
-            z_cf_a = z.clone()
-            # Counterfactual scenario B: our imagination of what might have happened
-            z_cf_b = z_orig
-            # Instead of the regular actions, apply an alternate policy
-            cf_actions = actions.copy()
-            np.random.shuffle(cf_actions)
-            for t in range(1, prediction_horizon - 1):
-                onehot_a = torch.eye(num_actions)[cf_actions[:,t]].cuda()
-                z_cf_b = transition(z_cf_b, onehot_a)
-            cf_loss = torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1).mean(-1)
-            cf_loss = .01 * torch.mean(cf_loss * active_mask)
-            loss += cf_loss
-            ts.collect('CF Sparsity Loss', cf_loss)
-
         # COUNTERFACTUAL DISENTANGLEMENT REGULARIZATION
         # Suppose that our representation is ideally, perfectly disentangled
         # Then the PGM has no edges, the causal graph is just nodes with no relationships
         # In this case, it should be true that intervening on any one factor has no effect on the others
         # One fun way of intervening is swapping factors, a la FactorVAE
         # If we intervene on some dimensions, the other dimensions should be unaffected
-        enable_cf_shuffle_loss = False
-        if enable_cf_shuffle_loss and train_iter % 5 == 0:
+        if enable_cf_shuffle_loss and train_iter % CF_REGULARIZATION_RATE == 0:
             # Counterfactual scenario A: our memory of what really happened
             z_cf_a = z.clone()
             # Counterfactual scenario B: a bizzaro world where two dimensions are swapped
@@ -269,16 +250,15 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 z_cf_b = transition(z_cf_b, onehot_a)
             # Every UNSWAPPED dimension should be as similar as possible to its bizzaro-world equivalent
             cf_loss = torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1) * unswapped_factor_map
-            cf_loss = .01 * torch.mean(cf_loss.mean(-1) * active_mask)
+            cf_loss = CF_REGULARIZATION_LAMBDA * torch.mean(cf_loss.mean(-1) * active_mask)
             loss += cf_loss
             ts.collect('CF Disentanglement Loss', cf_loss)
 
-        # COUNTERFACTUAL ILLUSORY CONTROL BIAS
+        # COUNTERFACTUAL ACTION-CONTROL REGULARIZATION
         # In difficult POMDPs, deep neural networks can suffer from learned helplessness
         # They learn, rationally, that their actions have no causal influence on the reward
         # This is undesirable: the learned model should assume that outcomes are controllable
-        enable_control_bias_loss = False
-        if enable_control_bias_loss and train_iter % 5 == 0:
+        if enable_control_bias_loss and train_iter % CF_REGULARIZATION_RATE == 0:
             # Counterfactual scenario A: our memory of what really happened
             z_cf_a = z.clone()
             # Counterfactual scenario B: our imagination of what might have happened
@@ -291,7 +271,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 z_cf_b = transition(z_cf_b, onehot_a)
             eps = .001  # for numerical stability
             cf_loss = -torch.log(torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1).mean(-1) + eps)
-            cf_loss = .01 * torch.mean(cf_loss * active_mask)
+            cf_loss = CF_REGULARIZATION_LAMBDA * torch.mean(cf_loss * active_mask)
             loss += cf_loss
             ts.collect('CF Control Bias Loss', cf_loss)
 
