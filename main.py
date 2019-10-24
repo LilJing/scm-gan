@@ -47,6 +47,7 @@ parser.add_argument('--transition-l1-coef', type=float, default=.01, help='Trans
 
 parser.add_argument('--enable-action-control-loss', action='store_true', help='Enable the CF Action Control regulariztion')
 parser.add_argument('--enable-disentanglement-loss', action='store_true', help='Enable the CF Disentanglement regularization')
+parser.add_argument('--counterfactual-horizon', type=int, default=1, help='If CF losses are enabled, forward horizon for CF generation')
 args = parser.parse_args()
 
 ITERS_PER_VIDEO = 2000
@@ -118,6 +119,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     REWARD_COEF = args.reward_coef
     ACTIVATION_L1_COEF = args.activation_l1_coef
     TRANSITION_L1_COEF = args.transition_l1_coef
+    counterfactual_horizon = args.counterfactual_horizon
     start_iter = args.start_iter
 
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=learning_rate)
@@ -245,7 +247,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                 unswapped_factor_map[i, idx_b] = 0
                 z_cf_b[i, idx_a], z_cf_b[i, idx_b] = z_cf_b[i, idx_b], z_cf_b[i, idx_a]
             # But we take the same actions
-            for t in range(1, prediction_horizon - 1):
+            for t in range(1, counterfactual_horizon):
                 onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
                 z_cf_b = transition(z_cf_b, onehot_a)
             # Every UNSWAPPED dimension should be as similar as possible to its bizzaro-world equivalent
@@ -266,7 +268,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             # Instead of the regular actions, apply an alternate policy
             cf_actions = actions.copy()
             np.random.shuffle(cf_actions)
-            for t in range(1, prediction_horizon - 1):
+            for t in range(1, counterfactual_horizon):
                 onehot_a = torch.eye(num_actions)[cf_actions[:,t]].cuda()
                 z_cf_b = transition(z_cf_b, onehot_a)
             eps = .001  # for numerical stability
@@ -795,6 +797,8 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
     # Simulate the future, compare with reality
     mse_losses = []
     mse_stddevs = []
+    reward_losses = []
+    reward_stddevs = []
     active_mask = torch.ones(batch_size).cuda()
     for t in range(2, timesteps):
         active_mask = active_mask * (1 - dones[:, t])
@@ -810,6 +814,15 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         mse_losses.append(float(rec_loss))
         mse_stddevs.append(float(rec_std))
 
+        # Sum the positive/negative rewards
+        r_expected = rewards[:, t].sum(-1)
+        r_predicted = reward_pred(z).sum(-1)
+        r_diffs = active_mask * (r_expected - r_predicted)**2
+        rec_loss = torch.mean(r_diffs) * batch_size / torch.sum(active_mask)
+        rec_std = torch.std(r_diffs) * batch_size / torch.sum(active_mask)
+        reward_losses.append(float(rec_loss))
+        reward_stddevs.append(float(rec_std))
+
         #mae_loss = torch.mean(torch.abs(expected - predicted))
         #print('MAE t={} {:.04f}\n'.format(t, mae_loss))
         #mae_losses.append(float(mae_loss))
@@ -822,8 +835,23 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         timesteps, min(mse_losses), max(mse_losses)))
     print(sparkline(mse_losses, length=80))
     print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
+
+    print(sparkline(reward_losses, length=80))
+    print('Avg. MSE loss: {}'.format(np.mean(reward_losses)))
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
+    plot_error_graph(mse_losses, mse_stddevs, experiment_name='pixel',
+                     train_iter=train_iter,
+                     facecolor='#00FF00', edgecolor='#00FF00',
+                     title='Prediction Error vs. Time (Pixel MSE)')
+    plot_error_graph(reward_losses, reward_stddevs, experiment_name='reward',
+                     train_iter=train_iter,
+                     facecolor='#FFFF00', edgecolor='#FFFF00',
+                     title='Prediction Error vs. Time (Reward)')
+
+
+def plot_error_graph(mse_losses, mse_stddevs, experiment_name, train_iter, title='',
+            facecolor='#00FF00', edgecolor='#00FF00'):
     mse_filename = 'mse_{}_iter_{:06d}.json'.format(experiment_name, train_iter)
     with open(mse_filename, 'w') as fp:
         fp.write(json.dumps(mse_losses, indent=2))
@@ -832,18 +860,18 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         fp.write(json.dumps(mse_stddevs, indent=2))
 
     plot_params = {
-        'title': 'Mean Squared Error Pixel Loss: {}'.format(args.title),
+        'title': 'Loss: {}'.format(title),
         'grid': True,
     }
     plt = pd.Series(mse_losses).plot(**plot_params)
     plt.set_ylim(bottom=0)
-    plt.set_ylabel('Pixel MSE')
+    plt.set_ylabel('MSE')
     plt.set_xlabel('Prediction horizon (timesteps)')
 
     plot_mse(plt, mse_filename, stddev_filename)
-    plot_mse(plt, mse_filename, stddev_filename, facecolor='#00FF00', edgecolor='#00FF00')
+    plot_mse(plt, mse_filename, stddev_filename, )
 
-    filename = 'mse_graph_iter_{:06d}.png'.format(train_iter)
+    filename = 'mse_{}_iter_{:06d}.png'.format(experiment_name, train_iter)
     imutil.show(plt, filename=filename)
     from matplotlib import pyplot
     pyplot.close()
