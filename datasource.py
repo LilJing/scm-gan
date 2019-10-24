@@ -2,6 +2,7 @@ from envs import sc2_star_intruders
 from envs import betterpong
 from envs import gridworld
 from envs import gameoflife
+from envs import minipacman
 
 
 def allocate_datasource(datasource_name):
@@ -19,6 +20,8 @@ def allocate_datasource(datasource_name):
         return GridWorld()
     elif datasource_name == 'gameoflife':
         return GameOfLife()
+    elif datasource_name == 'minipacman':
+        return MiniPacMan()
     msg = 'Failed to find datasource with name {}'.format(datasource_name)
     raise ValueError(msg)
 
@@ -60,7 +63,7 @@ class Pong(Datasource):
         self.conv_input_channels = 3
         self.conv_output_channels = 3
 
-    def make_env(self):
+    def make_env(self, *args, **kwargs):
         return betterpong.BetterPongEnv()
 
     def get_trajectories(self, *args, **kwargs):
@@ -75,7 +78,7 @@ class GridWorld(Datasource):
         self.conv_input_channels = 3
         self.conv_output_channels = 3
 
-    def make_env(self):
+    def make_env(self, *args, **kwargs):
         return gridworld.Env()
 
     def get_trajectories(self, *args, **kwargs):
@@ -90,9 +93,28 @@ class GameOfLife(Datasource):
         self.conv_input_channels = 1
         self.conv_output_channels = 1
 
-    def make_env(self):
+    def make_env(self, *args, **kwargs):
         return gameoflife.Env()
 
     def get_trajectories(self, *args, **kwargs):
         states, rewards, dones, actions = gameoflife.get_trajectories(*args, **kwargs)
+        return states, rewards, dones, actions
+
+
+class MiniPacMan(Datasource):
+    def __init__(self):
+        self.binary_input_channels = minipacman.NUM_ACTIONS
+        self.scalar_output_channels = minipacman.NUM_REWARDS
+        self.conv_input_channels = 3
+        self.conv_output_channels = 3
+
+    def make_env(self, *args, **kwargs):
+        return minipacman.MiniPacManEnv()
+
+    def convert_frame(self, state):
+        state = state.transpose((2,0,1))
+        return state, state
+
+    def get_trajectories(self, *args, **kwargs):
+        states, rewards, dones, actions = minipacman.get_trajectories(*args, **kwargs)
         return states, rewards, dones, actions

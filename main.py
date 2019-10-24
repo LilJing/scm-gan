@@ -10,10 +10,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import pandas as pd
 
 import imutil
 from logutil import TimeSeries, sparkline
-import pandas as pd
 
 import models
 from datasource import allocate_datasource
@@ -30,6 +30,7 @@ parser.add_argument('--evaluations', type=int, default=1, help='Integer number o
 parser.add_argument('--title', type=str, help='Name of experiment in output figures')
 parser.add_argument('--batch-size', type=int, default=32, help='Training batch size')
 parser.add_argument('--train-iters', type=int, default=10000, help='Number of iterations of training')
+parser.add_argument('--start-iter', type=int, default=1, help='Start iteration when resuming from checkpoint')
 
 parser.add_argument('--truncate-bptt', action='store_true', help='Train only with timestep-local information (training only)')
 parser.add_argument('--latent-overshooting', action='store_true', help='Train with Latent Overshooting from Hafner et al. (training only)')
@@ -38,14 +39,26 @@ parser.add_argument('--td-lambda', type=float, default=0.9, help='Scalar lambda 
 parser.add_argument('--td-steps', type=int, default=3, help='Number of concurrent TD forward predictions (training only)')
 parser.add_argument('--horizon-min', type=int, default=3, help='Min timestep horizon value (training only)')
 parser.add_argument('--horizon-max', type=int, default=10, help='Max timestep horizon value (training only)')
-parser.add_argument('--learning-rate', type=float, default=.001, help='Adam lr value (training only)')
+parser.add_argument('--learning-rate', type=float, default=.0001, help='Adam lr value (training only)')
 parser.add_argument('--finetune-reward', action='store_true', help='Train ONLY the reward estimation network (training only)')
 parser.add_argument('--reward-coef', type=float, default=.001, help='Reward loss magnitude (training only)')
 parser.add_argument('--activation-l1-coef', type=float, default=.01, help='Activation sparsity coefficient (training only)')
 parser.add_argument('--transition-l1-coef', type=float, default=.01, help='Transition sparsity coefficient (training only)')
+
+parser.add_argument('--enable-action-control-loss', action='store_true', help='Enable the CF Action Control regulariztion')
+parser.add_argument('--enable-disentanglement-loss', action='store_true', help='Enable the CF Disentanglement regularization')
+parser.add_argument('--counterfactual-horizon', type=int, default=1, help='If CF losses are enabled, forward horizon for CF generation')
 args = parser.parse_args()
 
+ITERS_PER_VIDEO = 2000
+CF_REGULARIZATION_RATE = 5
+CF_REGULARIZATION_LAMBDA = .01
 
+enable_cf_shuffle_loss = args.enable_disentanglement_loss
+enable_control_bias_loss = args.enable_action_control_loss
+
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.enabled = True
 
 
 def main():
@@ -77,11 +90,13 @@ def main():
         reward_predictor.load_state_dict(torch.load(os.path.join(args.load_from, 'model-reward_predictor.pth')))
 
     if args.evaluate:
-        evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, use_training_set=True)
+        print('Finished {} playthroughs'.format(args.evaluations))
         for _ in range(args.evaluations):
-            play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
-                 reward_predictor, discriminator, transition)
-        print('Finished {} evaluations'.format(args.evaluations))
+            with torch.no_grad():
+                play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
+                     reward_predictor, discriminator, transition)
+        print('Finished {} playthroughs'.format(args.evaluations))
+        evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, use_training_set=True)
     else:
         train(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
               reward_predictor, discriminator, transition)
@@ -104,6 +119,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     REWARD_COEF = args.reward_coef
     ACTIVATION_L1_COEF = args.activation_l1_coef
     TRANSITION_L1_COEF = args.transition_l1_coef
+    counterfactual_horizon = args.counterfactual_horizon
+    start_iter = args.start_iter
 
     opt_enc = torch.optim.Adam(encoder.parameters(), lr=learning_rate)
     opt_dec = torch.optim.Adam(decoder.parameters(), lr=learning_rate)
@@ -112,8 +129,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
     opt_pred = torch.optim.Adam(reward_predictor.parameters(), lr=learning_rate)
     ts = TimeSeries('Training Model', train_iters, tensorboard=True)
 
-    for train_iter in range(0, train_iters + 1):
-        if train_iter % 1000 == 0:
+    for train_iter in range(start_iter, train_iters + 1):
+        if train_iter % ITERS_PER_VIDEO == 0:
             print('Evaluating networks...')
             evaluate(datasource, encoder, decoder, transition, discriminator, reward_predictor, latent_dim, train_iter=train_iter)
             print('Saving networks to filesystem...')
@@ -143,6 +160,7 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         # Encode the initial state (using the first 3 frames)
         # Given t, t+1, t+2, encoder outputs the state at time t+1
         z = encoder(states[:, 0:3])
+        z_orig = z.clone()
 
         # But wait, here's the problem: We can't use the encoded initial state as
         # an initial state of the dynamical system and expect the system to work
@@ -153,10 +171,8 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         active_mask = torch.ones(batch_size).cuda()
 
         loss = 0
-        td_lambda_loss = 0
         lo_loss = 0
         lo_z_set = {}
-        td_z_set = {}
         # Given the state encoded at t=2, predict state at t=3, t=4, ...
         for t in range(1, prediction_horizon - 1):
             active_mask = active_mask * (1 - dones[:, t])
@@ -181,19 +197,21 @@ def train(latent_dim, datasource, num_actions, num_rewards,
             loss += rec_loss
 
             # Apply activation L1 loss
-            l1_values = z.abs().mean(-1).mean(-1).mean(-1)
-            l1_loss = ACTIVATION_L1_COEF * torch.mean(l1_values * active_mask)
-            ts.collect('L1 t={}'.format(t), l1_loss)
-            loss += theta * l1_loss
+            #l1_values = z.abs().mean(-1).mean(-1).mean(-1)
+            #l1_loss = ACTIVATION_L1_COEF * torch.mean(l1_values * active_mask)
+            #ts.collect('L1 t={}'.format(t), l1_loss)
+            #loss += theta * l1_loss
 
             # Predict transition to the next state
             onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
             new_z = transition(z, onehot_a)
+
             # Apply transition L1 loss
-            t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
-            t_l1_loss = TRANSITION_L1_COEF * torch.mean(t_l1_values * active_mask)
-            ts.collect('T-L1 t={}'.format(t), t_l1_loss)
-            loss += theta * t_l1_loss
+            #t_l1_values = ((new_z - z).abs().mean(-1).mean(-1).mean(-1))
+            #t_l1_loss = TRANSITION_L1_COEF * torch.mean(t_l1_values * active_mask)
+            #ts.collect('T-L1 t={}'.format(t), t_l1_loss)
+            #loss += theta * t_l1_loss
+
             z = new_z
 
             if enable_latent_overshooting:
@@ -211,49 +229,65 @@ def train(latent_dim, datasource, num_actions, num_rewards,
                     lo_loss_batch = latent_state_loss(target_activations, predicted_activations)
                     lo_loss += td_lambda_coef * torch.mean(lo_loss_batch * active_mask)
 
-            if not enable_td:
-                continue
-
-            # TD-Lambda Loss
-            # State i|j is the predicted state at time i conditioned on observation j
-            # Eg. if we predict 2 steps perfectly, then state 3|1 will be equal to state 3|3
-            # Also, state 3|1 will be equal to state 3|2
-            td_z_set[t] = encoder(states[:, t-1:t+2])
-
-            # For each previous t_left, step forward to t
-            for t_left in range(1, t):
-                a = torch.eye(num_actions)[actions[:, t - 1]].cuda()
-                td_z_set[t_left] = transition(td_z_set[t_left], a)
-
-            # At time t_r, consider each combination (t_a, t_b) where a < b <= r
-            # At t_a, we thought t_r would be s_{r|a}
-            # But later at t_b, we updated our belief to s_{r|b}
-            # Update s_{r|a} to be closer to s_{r|b}, for every b up to and including s_{r|r}
-            for t_a in range(2, t - 1):
-                # Single-Step TD: 4:3, 3:2, 2:1
-                # Multi-Step TD: 4:3, 4:2, 4:1, 3:2, 3:1...
-                for t_b in range(t_a + 1, min(t_a + td_steps, t + 1)):
-                    # Learn a guess, from a guess
-                    predicted_activations = td_z_set[t_a]
-                    target_activations = td_z_set[t_b].detach()
-                    td_loss_batch = latent_state_loss(target_activations, predicted_activations)
-                    td_loss = torch.mean(td_loss_batch * active_mask)
-                    td_coef = td_lambda_coef ** (t_b - t_a - 1) * td_lambda_coef ** (t_a - 1)
-                    td_lambda_loss += td_coef * td_loss
-                    # TD including reward
-                    predicted_r = reward_predictor(predicted_activations)
-                    target_r = reward_predictor(target_activations).detach()
-                    r_diffs = torch.mean((predicted_r - target_r)**2, dim=1)
-                    r_loss = torch.mean(r_diffs * active_mask)
-                    td_lambda_loss += td_coef * r_loss
-            # end TD time loop
         if enable_latent_overshooting:
             ts.collect('LO total', lo_loss)
             loss += theta * lo_loss
-        if enable_td:
-            ts.collect('TD total', td_lambda_loss)
-            loss += theta * td_lambda_loss
+
+        # COUNTERFACTUAL DISENTANGLEMENT REGULARIZATION
+        # Suppose that our representation is ideally, perfectly disentangled
+        # Then the PGM has no edges, the causal graph is just nodes with no relationships
+        # In this case, it should be true that intervening on any one factor has no effect on the others
+        # One fun way of intervening is swapping factors, a la FactorVAE
+        # If we intervene on some dimensions, the other dimensions should be unaffected
+        if enable_cf_shuffle_loss and train_iter % CF_REGULARIZATION_RATE == 0:
+            # Counterfactual scenario A: our memory of what really happened
+            z_cf_a = z.clone()
+            # Counterfactual scenario B: a bizzaro world where two dimensions are swapped
+            z_cf_b = z_orig
+            unswapped_factor_map = torch.ones((batch_size, latent_dim)).cuda()
+            for i in range(batch_size):
+                idx_a = np.random.randint(latent_dim)
+                idx_b = np.random.randint(latent_dim)
+                unswapped_factor_map[i, idx_a] = 0
+                unswapped_factor_map[i, idx_b] = 0
+                z_cf_b[i, idx_a], z_cf_b[i, idx_b] = z_cf_b[i, idx_b], z_cf_b[i, idx_a]
+            # But we take the same actions
+            for t in range(1, counterfactual_horizon):
+                onehot_a = torch.eye(num_actions)[actions[:, t]].cuda()
+                z_cf_b = transition(z_cf_b, onehot_a)
+            # Every UNSWAPPED dimension should be as similar as possible to its bizzaro-world equivalent
+            cf_loss = torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1) * unswapped_factor_map
+            cf_loss = CF_REGULARIZATION_LAMBDA * torch.mean(cf_loss.mean(-1) * active_mask)
+            loss += cf_loss
+            ts.collect('CF Disentanglement Loss', cf_loss)
+
+        # COUNTERFACTUAL ACTION-CONTROL REGULARIZATION
+        # In difficult POMDPs, deep neural networks can suffer from learned helplessness
+        # They learn, rationally, that their actions have no causal influence on the reward
+        # This is undesirable: the learned model should assume that outcomes are controllable
+        if enable_control_bias_loss and train_iter % CF_REGULARIZATION_RATE == 0:
+            # Counterfactual scenario A: our memory of what really happened
+            z_cf_a = z.clone()
+            # Counterfactual scenario B: our imagination of what might have happened
+            z_cf_b = z_orig
+            # Instead of the regular actions, apply an alternate policy
+            cf_actions = actions.copy()
+            np.random.shuffle(cf_actions)
+            for t in range(1, counterfactual_horizon):
+                onehot_a = torch.eye(num_actions)[cf_actions[:,t]].cuda()
+                z_cf_b = transition(z_cf_b, onehot_a)
+            eps = .001  # for numerical stability
+            cf_loss = -torch.log(torch.abs(z_cf_a - z_cf_b).mean(-1).mean(-1).mean(-1) + eps)
+            cf_loss = CF_REGULARIZATION_LAMBDA * torch.mean(cf_loss * active_mask)
+            loss += cf_loss
+            ts.collect('CF Control Bias Loss', cf_loss)
+
         loss.backward()
+
+        from torch.nn.utils.clip_grad import clip_grad_value_
+        clip_grad_value_(encoder.parameters(), 0.1)
+        clip_grad_value_(transition.parameters(), 0.1)
+        clip_grad_value_(decoder.parameters(), 0.1)
 
         opt_pred.step()
         if not args.finetune_reward:
@@ -263,6 +297,10 @@ def train(latent_dim, datasource, num_actions, num_rewards,
         ts.print_every(10)
     print(ts)
     print('Finished')
+
+
+def td_latent_state_loss(target, predicted):
+    return sum(latent_state_loss(t, p) for (t, p) in zip(target, predicted))
 
 
 def latent_state_loss(target, predicted):
@@ -305,11 +343,11 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
     # Estimate initial state (given t=0,1,2 estimate state at t=2)
     states = torch.Tensor(state_list).cuda().unsqueeze(0)
     z = encoder(states)
-    z = transition(z, onehot(no_op))
+    z = transition(z, onehot(no_op, num_actions))
 
     cumulative_reward = 0
     filename = 'SimpleRolloutAgent-{}.mp4'.format(int(time.time()))
-    vid = imutil.Video(filename, framerate=12)
+    vid = imutil.Video(filename, framerate=10)
     t = 2
     cumulative_negative_reward = 0
     cumulative_positive_reward = 0
@@ -318,8 +356,10 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         # In simulation, compute all possible futures to select the best action
         rewards = []
         for a in range(num_actions):
-            z_a = transition(z, onehot(a))
-            r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions, a)
+            z_a = transition(z, onehot(a, num_actions))
+            # Look ahead three steps, using 3-step lookahead
+            r_a = compute_rollout_reward(z_a, transition, reward_predictor, num_actions, a,
+                                         rollout_depth=12, rollout_policy='noop')
             rewards.append(r_a)
             #print('Expected reward from taking action {} is {:.03f}'.format(a, r_a))
         max_r = max(rewards)
@@ -328,8 +368,12 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
         # Take the best action, in real life
         new_state, new_reward, done, info = env.step(max_a)
 
-        positive_reward = sum(v for v in info.values() if v > 0)
-        negative_reward = sum(v for v in info.values() if v < 0)
+        if len(info) > 1:
+            positive_reward = sum(v for v in info.values() if v > 0)
+            negative_reward = sum(v for v in info.values() if v < 0)
+        else:
+            positive_reward = max(0, new_reward)
+            negative_reward = min(0, new_reward)
 
         cumulative_positive_reward += positive_reward
         cumulative_negative_reward -= negative_reward
@@ -344,7 +388,7 @@ def play(latent_dim, datasource, num_actions, num_rewards, encoder, decoder,
 
         state_list = state_list[1:] + [ftr_state]
         z = encoder(torch.Tensor(state_list).cuda().unsqueeze(0))
-        z = transition(z, onehot(max_a))
+        z = transition(z, onehot(max_a, num_actions))
         t += 1
         if t > 300:
             print('Ending evaluation due to time limit')
@@ -368,8 +412,10 @@ def generate_trajectory_video(datasource):
 
 
 def generate_planning_visualization(z, transition, decoder, reward_predictor,
-                                    num_actions, vid=None, rollout_width=64, rollout_depth=20,
+                                    num_actions, vid=None, lookahead=3, rollout_depth=20,
                                     caption_title="Neural Simulation", actions_list=None):
+    assert lookahead == 3  # TODO: support different lookahead values
+    rollout_width = num_actions ** lookahead
     if actions_list:
         actions = np.array([actions_list] * rollout_width)
     else:
@@ -378,7 +424,7 @@ def generate_planning_visualization(z, transition, decoder, reward_predictor,
     frames = []
     z = z.repeat(rollout_width, 1, 1, 1)
     for t in range(rollout_depth):
-        z = transition(z, onehot(actions[:, t]))
+        z = transition(z, onehot(actions[:, t], num_actions))
         features = decoder(z)
         features = torch.sigmoid(features)
         rewards = reward_predictor(z)
@@ -407,19 +453,22 @@ def onehot(a_idx, num_actions=4):
 
 
 def compute_rollout_reward(z, transition, reward_predictor, num_actions,
-                           selected_action, rollout_width=64, rollout_depth=16,
-                           negative_positive_tradeoff=10.0):
+                           selected_action, lookahead=2, rollout_depth=12,
+                           rollout_policy='noop', negative_positive_tradeoff=10.0):
+    rollout_width = num_actions ** lookahead
     # Initialize a beam
     z = z.repeat(rollout_width, 1, 1, 1)
 
-    # Use 3-step lookahead followed by a no-op rollout policy
-    noop_idx = 3
+    # Use 3-step lookahead followed by a rollout policy
     actions = []
     for i in range(num_actions):
         for j in range(num_actions):
-            for k in range(num_actions):
-                # Test the 3-action sequence [i,j,k] and then roll out
-                actions.append([i, j, k] + [noop_idx] * (rollout_depth - 3))
+            # Test the 2-action sequence [i,j] and then roll out
+            if rollout_policy == 'noop':
+                noop_idx = 0
+                actions.append([i, j] + [noop_idx] * (rollout_depth - lookahead))
+            elif rollout_policy == 'random':
+                actions.append([i, j] + [np.random.randint(num_actions) for _ in range(rollout_depth - lookahead)])
     actions = torch.LongTensor(np.array(actions)).cuda()
     assert len(actions) == rollout_width
 
@@ -428,7 +477,7 @@ def compute_rollout_reward(z, transition, reward_predictor, num_actions,
     # Starting from z, move forward in time and count the rewards
     for t in range(rollout_depth):
         z = z.detach()
-        z = transition(z, onehot(actions[:, t]))
+        z = transition(z, onehot(actions[:, t], num_actions))
         cumulative_reward += reward_predictor(z)
 
     # Heuristic, select level of "caution" about negative reward
@@ -550,8 +599,8 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
     print('Generating videos for offsets {}'.format(offsets))
     for offset in offsets:
         vid_rgb = imutil.Video('prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
-        vid_aleatoric = imutil.Video('anomaly_detection_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
-        #vid_reward = imutil.Video('reward_prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
+        #vid_aleatoric = imutil.Video('anomaly_detection_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
+        vid_reward = imutil.Video('reward_prediction_{:02}_iter_{:06d}.mp4'.format(offset, train_iter), framerate=3)
         for t in range(3, timesteps - offset):
             # Encode frames t-2, t-1, t to produce state at t-1
             # Then step forward once to produce state at t
@@ -576,21 +625,21 @@ def visualize_reconstruction(datasource, encoder, decoder, transition, reward_pr
             # Difference between actual and predicted outcomes is "surprise"
             surprise_map = torch.clamp((actual_features - predicted_features) ** 2, 0, 1)
 
-            caption = "t={} surprise (aleatoric): {:.03f}".format(t, surprise_map.sum())
-            pixels = composite_aleatoric_surprise_image(actual_rgb, surprise_map, z)
-            vid_aleatoric.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
+            #caption = "t={} surprise (aleatoric): {:.03f}".format(t, surprise_map.sum())
+            #pixels = composite_aleatoric_surprise_image(actual_rgb, surprise_map, z)
+            #vid_aleatoric.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
 
             caption = "Left: True t={} Right: Predicted t+{}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
             pixels = composite_feature_rgb_image(actual_features, actual_rgb, predicted_features, predicted_rgb)
             vid_rgb.write_frame(pixels, normalize=False, img_padding=8, caption=caption)
 
-            #caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
-            #reward_pixels = composite_rgb_reward_factor_image(predicted_rgb, reward_map, z, num_rewards=num_rewards)
-            #vid_reward.write_frame(reward_pixels, normalize=False, caption=caption)
+            caption = "t={} fwd={}, Pred. R: {}".format(t, offset, format_reward_vector(predicted_reward[0]))
+            reward_pixels = composite_rgb_reward_factor_image(predicted_rgb, reward_map, z, num_rewards=num_rewards)
+            vid_reward.write_frame(reward_pixels, normalize=False, caption=caption)
 
         vid_rgb.finish()
-        vid_aleatoric.finish()
-        #vid_reward.finish()
+        #vid_aleatoric.finish()
+        vid_reward.finish()
     print('Finished generating forward-prediction videos')
 
 
@@ -753,6 +802,8 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
     # Simulate the future, compare with reality
     mse_losses = []
     mse_stddevs = []
+    reward_losses = []
+    reward_stddevs = []
     active_mask = torch.ones(batch_size).cuda()
     for t in range(2, timesteps):
         active_mask = active_mask * (1 - dones[:, t])
@@ -768,6 +819,15 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         mse_losses.append(float(rec_loss))
         mse_stddevs.append(float(rec_std))
 
+        # Sum the positive/negative rewards
+        r_expected = rewards[:, t].sum(-1)
+        r_predicted = reward_pred(z).sum(-1)
+        r_diffs = active_mask * (r_expected - r_predicted)**2
+        rec_loss = torch.mean(r_diffs) * batch_size / torch.sum(active_mask)
+        rec_std = torch.std(r_diffs) * batch_size / torch.sum(active_mask)
+        reward_losses.append(float(rec_loss))
+        reward_stddevs.append(float(rec_std))
+
         #mae_loss = torch.mean(torch.abs(expected - predicted))
         #print('MAE t={} {:.04f}\n'.format(t, mae_loss))
         #mae_losses.append(float(mae_loss))
@@ -780,8 +840,23 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         timesteps, min(mse_losses), max(mse_losses)))
     print(sparkline(mse_losses, length=80))
     print('Avg. MSE loss: {}'.format(np.mean(mse_losses)))
+
+    print(sparkline(reward_losses, length=80))
+    print('Avg. MSE loss: {}'.format(np.mean(reward_losses)))
     print('Finished trajectory simulation in {:.02f}s'.format(time.time() - start_time))
 
+    plot_error_graph(mse_losses, mse_stddevs, experiment_name='pixel',
+                     train_iter=train_iter,
+                     facecolor='#00FF00', edgecolor='#00FF00',
+                     title='Prediction Error vs. Time (Pixel MSE)')
+    plot_error_graph(reward_losses, reward_stddevs, experiment_name='reward',
+                     train_iter=train_iter,
+                     facecolor='#FFFF00', edgecolor='#FFFF00',
+                     title='Prediction Error vs. Time (Reward)')
+
+
+def plot_error_graph(mse_losses, mse_stddevs, experiment_name, train_iter, title='',
+            facecolor='#00FF00', edgecolor='#00FF00'):
     mse_filename = 'mse_{}_iter_{:06d}.json'.format(experiment_name, train_iter)
     with open(mse_filename, 'w') as fp:
         fp.write(json.dumps(mse_losses, indent=2))
@@ -790,18 +865,18 @@ def measure_prediction_mse(datasource, encoder, decoder, transition, reward_pred
         fp.write(json.dumps(mse_stddevs, indent=2))
 
     plot_params = {
-        'title': 'Mean Squared Error Pixel Loss: {}'.format(args.title),
+        'title': 'Loss: {}'.format(title),
         'grid': True,
     }
     plt = pd.Series(mse_losses).plot(**plot_params)
     plt.set_ylim(bottom=0)
-    plt.set_ylabel('Pixel MSE')
+    plt.set_ylabel('MSE')
     plt.set_xlabel('Prediction horizon (timesteps)')
 
     plot_mse(plt, mse_filename, stddev_filename)
-    plot_mse(plt, mse_filename, stddev_filename, facecolor='#00FF00', edgecolor='#00FF00')
+    plot_mse(plt, mse_filename, stddev_filename, )
 
-    filename = 'mse_graph_iter_{:06d}.png'.format(train_iter)
+    filename = 'mse_{}_iter_{:06d}.png'.format(experiment_name, train_iter)
     imutil.show(plt, filename=filename)
     from matplotlib import pyplot
     pyplot.close()

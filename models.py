@@ -31,7 +31,7 @@ class DifferentiableBernoulliSampler(Function):
     @staticmethod
     def forward(ctx, x):
         # In the forward pass, discretize by sampling
-        #ctx.save_for_backward(x)
+        ctx.save_for_backward(x)
         return torch.bernoulli(x)
 
     @staticmethod
@@ -41,56 +41,23 @@ class DifferentiableBernoulliSampler(Function):
 
 
 class Transition(nn.Module):
-    def __init__(self, latent_size, num_actions, width=16):
+    def __init__(self, latent_size, num_actions):
         super().__init__()
         # Input: State + Action
         # Output: State
         self.latent_size = latent_size
 
-        self.res_depth = 16
-        self.reservoir = torch.zeros(1, self.res_depth, width, width).normal_().cuda()
-
-        #### experiment: what does the reservoir look like?
-        self.reservoir_conv = nn.Conv2d(self.res_depth, self.res_depth, (3,3), padding=0, groups=self.res_depth).cuda()
-        self.reservoir_conv.weight.requires_grad = False
-        self.reservoir_conv.bias.requires_grad = False
-
-        """
-        import imutil
-        vid = imutil.Video('reservoir')
-        for i in range(300):
-            print('Running reservoir iteration {}'.format(i))
-            self.reservoir = torch.tanh(convo(F.pad(self.reservoir, (1,1,1,1), mode='circular')))
-            self.reservoir /= (self.reservoir**2).mean()
-            vid.write_frame(self.reservoir[0], img_padding=4)
-            if i == 100:
-                self.reservoir[:, :, 16:48, 16:32].normal_()
-            self.reservoir.detach()
-        vid.finish()
-        """
-        self.stir_reservoir()
-
         # Skip connections from output of 1 to input of 6, and output of 2 to input of 5
-        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions + self.res_depth, 16, (4,4), stride=2, padding=1))
-        self.conv2 = SpectralNorm(nn.Conv2d(16, 32, (4,4), stride=2, padding=1))
-        #self.conv3 = (nn.Conv2d(32, 64, (4,4), stride=2, padding=1))
-        #self.conv4 = (nn.ConvTranspose2d(64, 32, (4,4), stride=2, padding=1))
-        self.conv5 = SpectralNorm(nn.ConvTranspose2d(32, 16, (4,4), stride=2, padding=1))
-        self.conv6 = nn.ConvTranspose2d(16 + 16, latent_size, (4,4), stride=2, padding=1)
+        self.conv1 = SpectralNorm(nn.Conv2d(latent_size + num_actions, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv2 = SpectralNorm(nn.Conv2d(128, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv3 = SpectralNorm(nn.Conv2d(128, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv4 = SpectralNorm(nn.Conv2d(128, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv5 = SpectralNorm(nn.Conv2d(128 + 128, 128, (3,3), stride=1, padding=2, padding_mode='circular'))
+        self.conv6 = nn.Conv2d(128 + 128, latent_size, (3,3), stride=1, padding=2, padding_mode='circular')
         self.cuda()
 
-    def step_reservoir(self):
-        self.reservoir = torch.tanh(self.reservoir_conv(F.pad(self.reservoir, (1,1,1,1), mode='circular')))
-        self.reservoir /= (self.reservoir ** 2).mean()
-
-    def stir_reservoir(self):
-        for _ in range(100):
-            self.step_reservoir()
-
-    def forward(self, s, a):
+    def forward(self, s, a, return_all=False):
         start_time = time.time()
-
-        self.step_reservoir()
 
         actions = a
         z_map = s
@@ -102,9 +69,8 @@ class Transition(nn.Module):
         actions = actions.unsqueeze(-1).unsqueeze(-1)
         actions = actions.repeat(1, 1, height, width)
 
-        # Stack the latent values, the actions, and a dynamic reservoir
-        augment = self.reservoir.repeat((batch_size, 1, 1, 1))
-        x = torch.cat([z_map, actions, augment], dim=1)
+        # Stack the latent values, the actions, and random chance
+        x = torch.cat([z_map, actions], dim=1)
 
         # Convolve down, saving skip activations like U-net
         x = self.conv1(x)
@@ -113,19 +79,24 @@ class Transition(nn.Module):
 
         x = self.conv2(x)
         x = F.leaky_relu(x)
+        skip2 = x.clone()
 
-        #skip2 = x.clone()
-
-        #x = self.conv3(x)
-        #x = F.leaky_relu(x)
+        x = self.conv3(x)
+        x = F.leaky_relu(x)
+        if return_all:
+            out3 = x.clone()
 
         # Convolve back up, using saved skips
-        #x = self.conv4(x)
-        #x = F.leaky_relu(x)
+        x = self.conv4(x)
+        x = F.leaky_relu(x)
+        if return_all:
+            out4 = x.clone()
 
-        #x = torch.cat([x, skip2], dim=1)
+        x = torch.cat([x, skip2], dim=1)
         x = self.conv5(x)
         x = F.leaky_relu(x)
+        if return_all:
+            out5 = x.clone()
 
         x = torch.cat([x, skip1], dim=1)
         x = self.conv6(x)
@@ -134,16 +105,17 @@ class Transition(nn.Module):
         # And now, to make it stochastic: sample from the resulting
         # factorized multivariate Bernoulli distribution
         if self.training:
-            #x = DifferentiableBernoulliSampler.apply(x)
+            x = DifferentiableBernoulliSampler.apply(x)
             pass
         else:
             # During test time, drop the sampling
-            #x = (x > 0.5).type(x.type())
-            #x = DifferentiableBernoulliSampler.apply(x)
+            x = (x > 0.5).type(x.type())
             pass
 
         #ts.collect('Transition', time.time() - start_time)
         #ts.print_every(10)
+        if return_all:
+            return (skip1, skip2, out3, out4, out5, x)
         return x
 
 
@@ -154,12 +126,12 @@ class Encoder(nn.Module):
         self.latent_size = latent_size
         self.color_channels = color_channels
         # Bx1x64x64
-        self.conv1 = SpectralNorm(nn.Conv2d(color_channels * ENCODER_INPUT_FRAMES, 64, (3,3), stride=1, padding=1))
-        #self.bn_conv1 = nn.BatchNorm2d(32)
+        self.conv1 = SpectralNorm(nn.Conv2d(color_channels * ENCODER_INPUT_FRAMES, 128, (3,3), stride=1, padding=1))
+        self.bn_conv1 = nn.BatchNorm2d(128)
         # Bx8x32x32
-        #self.conv2 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=1, padding=1))
-        #self.conv3 = SpectralNorm(nn.Conv2d(64, 64, (3,3), stride=2, padding=1))
-        self.conv4 = nn.Conv2d(64, latent_size, (4,4), stride=2, padding=1)
+        self.conv2 = SpectralNorm(nn.Conv2d(128, 128, (3,3), stride=1, padding=1))
+        self.conv3 = SpectralNorm(nn.Conv2d(128, 128, (3,3), stride=1, padding=1))
+        self.conv4 = nn.Conv2d(128, latent_size, (3,3), stride=1, padding=1)
 
         # Bxlatent_size
         self.cuda()
@@ -173,11 +145,11 @@ class Encoder(nn.Module):
         x = self.conv1(x)
         x = F.leaky_relu(x)
 
-        #x = self.conv2(x)
-        #x = F.leaky_relu(x)
+        x = self.conv2(x)
+        x = F.leaky_relu(x)
 
-        #x = self.conv3(x)
-        #x = F.leaky_relu(x)
+        x = self.conv3(x)
+        x = F.leaky_relu(x)
 
         x = self.conv4(x)
         x = torch.sigmoid(x)
@@ -286,13 +258,12 @@ class Decoder(nn.Module):
 
         # Bx1x64x64
         self.conv1 = nn.ConvTranspose2d(latent_size, latent_size*4, (3,3),
-                        stride=2, padding=1, groups=latent_size, bias=False)
+                        stride=1, padding=1)
         #self.bn_conv1 = nn.BatchNorm2d(32)
         # Bx8x32x32
         self.conv2 = nn.ConvTranspose2d(latent_size * 4,
-                                        latent_size*self.color_channels, (4,4),
-                                        stride=1, padding=1,
-                                        groups=latent_size, bias=False)
+                                        latent_size*self.color_channels, (3,3),
+                                        stride=1, padding=1)
         #self.bg = nn.Parameter(torch.zeros((3, IMG_SIZE, IMG_SIZE)).cuda())
         self.cuda()
 
@@ -306,7 +277,7 @@ class Decoder(nn.Module):
 
         x = self.conv2(x)
         # Sum the separate items
-        x = x.view(batch_size, latent_size, self.color_channels, height*2, width*2)
+        x = x.view(batch_size, latent_size, self.color_channels, height, width)
 
         # Optional: Learn to subtract static background, separate from objects
         #x = x + self.bg
